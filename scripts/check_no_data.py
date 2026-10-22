@@ -8,3 +8,7 @@
 #   *_possession_gt*.csv, *.pkl, *.npz, *.npy, *.parquet, *.pdf, ...
 # - any file larger than 5 MB
 # - Jupyter notebooks that still contain cell outputs (outputs can show real rows)
+#
+# Will also warn (locally, on every commit) if a data/ or vendor/challenge/data/ folder exists in
+# the working tree with anything in it besides its README. Git would not commit it, but AI tools
+# can still see it, so it should be moved to ~/mtah-data.

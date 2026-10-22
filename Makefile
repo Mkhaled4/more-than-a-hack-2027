@@ -2,6 +2,9 @@
 #
 #   make setup           create .venv (Python 3.12), install pinned deps, init the submodule,
 #                        enable the git hooks (git config core.hooksPath .githooks)
+#                        and print the data reminder: unpack the bundle into ~/mtah-data and
+#                        `export MTAH_DATA_DIR=~/mtah-data`. NOT into vendor/challenge/data/,
+#                        even though the official data README says "unpack here"
 #   make test            run the tests (synthetic data only, safe for anyone and for CI)
 #   make lint            ruff
 #   make submission      build outputs/Falafelona.csv from configs/final.yaml, then validate it
