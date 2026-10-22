@@ -108,8 +108,8 @@ export MTAH_DATA_DIR=~/mtah-data      # unpacked bundle, original file names
 
 | # | Deliverable | Owner | Status |
 |---|---|---|---|
-| 1 | `Falafelona.csv`: the possession file (~1.9 MB) | Tala | ⬜ |
-| 2 | This public repo: **regenerates the exact same file** with pinned deps and one command | Tala | ⬜ |
+| 1 | `Falafelona.csv`: the possession file (~1.9 MB) | _TBD_ | ⬜ |
+| 2 | This public repo: **regenerates the exact same file** with pinned deps and one command | _TBD_ | ⬜ |
 | 3 | `Falafelona.pdf` / `.md`: approach, assets used *and dropped*, possession rules, limitations, reproduction | _TBD_ | ⬜ |
 
 A Google account is needed to upload.
