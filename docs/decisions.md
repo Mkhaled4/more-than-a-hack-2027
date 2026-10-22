@@ -14,4 +14,6 @@ One line per decision we don't want to re-argue. Newest at the bottom.
 | D7 | 2026-10-22 | **Experiment results stored in the repo**: one YAML per run in `experiments/runs/`, aggregates only | Versioned with the code that produced them; no merge conflicts; feeds the technical doc | ✅ |
 | D8 | 2026-10-22 | Integration check **every Friday** (Saturday as fallback); **freeze meeting Sat 14 Nov**; internal submit Mon 16 Nov | Catch integration problems weekly, not at the deadline; one day of buffer before 17 Nov | ✅ |
 | D9 | 2026-10-22 | Do **not** tune on the public 5-minute GT; use it only as a pipeline check; compare runs with bootstrap CIs | Organisers show it picks the wrong model (smooth125 vs smooth50); <0.04 spellF1 is noise | ✅ |
-| D10 | 2026-10-22 | Python 3.12, dependencies locked with `uv` (`uv.lock`), one command `make submission` | Reproduction must give the *identical* file | 💬 |
+| D10 | 2026-10-22 | Python 3.12, exact-pinned `requirements.txt` (pip). Switch to `uv` + `uv.lock` only if the team prefers it. One command: `make submission` | Reproduction must give the *identical* file; pip needs no extra install | 💬 |
+| D11 | 2026-10-22 | Experiment records hold the public-5-min score (sanity only) + label-free full-match stats; no full-match score is claimed | We have no full-match ground truth before results day | ✅ |
+| D12 | 2026-10-22 | Skeleton is merged as **comment-only placeholders**; code arrives in follow-up PRs per workstream | Agree on structure first; small, reviewable PRs | ✅ |

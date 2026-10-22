@@ -1,0 +1,15 @@
+# Keep match data and derived files away from AI tools (best-effort backstop; see CLAUDE.md).
+# The data itself lives outside the repo in $MTAH_DATA_DIR.
+data/
+cache/
+outputs/
+*.mp4
+*_atd.txt
+*_atd.xml
+*_smart_tagging.xml
+*_homography.csv
+*_possession_gt*.csv
+*.pkl
+*.npz
+*.npy
+*.parquet

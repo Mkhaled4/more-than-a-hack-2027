@@ -1,0 +1,7 @@
+# Python package definition for `falafelona` (code lives in src/falafelona/).
+#
+# Will contain:
+# - project metadata, requires-python = ">=3.12,<3.13"
+# - direct dependencies only (numpy, pandas, PyYAML); exact pins live in requirements.txt
+# - console script: `falafelona` -> falafelona.cli:main
+# - pytest settings (testpaths = tests) and ruff settings (line length 100, exclude vendor/)

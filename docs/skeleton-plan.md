@@ -1,6 +1,6 @@
 # 🏗️ Repo skeleton plan
 
-This is the plan for how the repo is laid out and how we work in it. It's a **proposal**: comment on the PR, and once it's merged we build the skeleton from it.
+This is the plan for how the repo is laid out and how we work in it. The skeleton in this PR follows it: **every file exists, but holds only comments describing what will go in it**. No pipeline code yet. Comment on the PR; once it's merged, each workstream fills in its files.
 Every choice made here is also recorded in [`decisions.md`](decisions.md).
 
 ---
@@ -14,19 +14,23 @@ Falafelona-hackathon/
 ├─ AGENTS.md → CLAUDE.md         symlink, same rules for Codex / Cursor / Gemini / Copilot
 ├─ Makefile                      `make setup | test | submission | validate | eval`
 ├─ pyproject.toml                package + Python pin (3.12)
-├─ uv.lock                       exact pinned dependencies (what reproduction uses)
+├─ requirements.txt              exact pinned runtime deps (what reproduction uses)
+├─ requirements-dev.txt          + pytest, ruff
 ├─ .gitignore                    data, outputs, caches, videos, PDFs (see §3)
-├─ .githooks/pre-commit          blocks data files and large files from being committed
+├─ .githooks/pre-commit          runs scripts/check_no_data.py on staged files
 ├─ .claude/settings.json         Claude Code: deny reading data paths
 ├─ .cursorignore / .aiexclude / .geminiignore     same deny list for other AI tools
 ├─ .github/
 │  ├─ pull_request_template.md   filled in on every PR
-│  └─ workflows/ci.yml           lint + tests (synthetic data) + "no data files" check
+│  └─ workflows/README.md        ci.yml comes later: lint + tests (synthetic data) + no-data check
 ├─ vendor/challenge/             git submodule → metrica-sports/more-than-a-hack-2027 (pinned)
 ├─ configs/
 │  ├─ baseline.yaml              reproduces baseline_smooth50
-│  └─ final.yaml                 the submitted configuration (frozen 14 Nov)
+│  ├─ final.yaml                 the submitted configuration (frozen 14 Nov)
+│  └─ exp/                       one config per experiment
 ├─ src/falafelona/
+│  ├─ vendor.py                  imports the official games.py / possession_metrics from the submodule
+│  ├─ config.py                  loads configs/*.yaml
 │  ├─ io.py                      loads data via vendor games.asset_paths() + MTAH_DATA_DIR
 │  ├─ ball.py                    ws:ball: gap filling, false-detection filter
 │  ├─ deadball.py                ws:dead: D detector
@@ -34,17 +38,22 @@ Falafelona-hackathon/
 │  ├─ pipeline.py                ws:int: glue, writes outputs/Falafelona.csv
 │  └─ cli.py                     `python -m falafelona run --config configs/final.yaml`
 ├─ scripts/
-│  ├─ bootstrap_eval.py          ws:eval: bootstrap CIs for spellF1 / macroF1
-│  └─ log_experiment.py          writes an experiment record (see §6)
+│  ├─ check_no_data.py           guard used by the pre-commit hook and CI
+│  ├─ bootstrap_eval.py          ws:eval: public-5-min sanity score + label-free match stats
+│  ├─ log_experiment.py          writes an experiment record (see §6)
+│  └─ setup_github.sh            labels + list of manual GitHub settings
 ├─ experiments/
 │  ├─ README.md                  how to log a run
 │  ├─ runs/                      one YAML per run (aggregate metrics only)
 │  └─ RESULTS.md                 summary table, generated from runs/
 ├─ notebooks/                    exploration only; the pipeline never imports from here
 ├─ tests/
-│  ├─ fixtures/                  small SYNTHETIC tracking files (never real data)
-│  ├─ test_format.py             199,319 rows, frames 0…199318, labels ∈ {H,A,D,X}
-│  └─ test_determinism.py        run twice → identical SHA-256
+│  ├─ synthetic.py               generates a SYNTHETIC data bundle in a temp folder at test time
+│  ├─ conftest.py                shared fixtures
+│  ├─ test_format.py             submission contract (official validator function)
+│  ├─ test_determinism.py        run twice → identical SHA-256
+│  ├─ test_baseline_equivalence.py   baseline.yaml == official baseline, on synthetic data
+│  └─ test_no_data_guard.py      the guard blocks what it should
 ├─ docs/
 │  ├─ skeleton-plan.md           this file
 │  ├─ decisions.md               decision log
@@ -85,6 +94,7 @@ export MTAH_DATA_DIR=~/mtah-data
 ```
 
 - The code reads the path **only** from `MTAH_DATA_DIR` (through `games.asset_paths()`). If the variable is unset, it stops with a clear error. There is no fallback path.
+- Tests generate synthetic data in a temp folder at run time, so not even fake data-shaped files are committed.
 - `.gitignore` still lists `data/`, `*.mp4`, `*_atd.*`, `*_smart_tagging.xml`, `*_homography.csv`, `*_possession_gt*.csv`, `*.pkl`, `outputs/`, `*.pdf` as a backstop.
 - **Pre-commit hook** (`.githooks/pre-commit`, enable once with `git config core.hooksPath .githooks`) rejects commits that stage those patterns or any file > 5 MB.
 - **CI check** fails a PR that contains them.
@@ -155,18 +165,22 @@ branch: exp/poss-hmm-min-duration
 commit: <short sha>
 config: configs/exp/poss-hmm-mindur50.yaml
 change: "HMM with 50-frame minimum duration on top of nearest-player"
-metrics:                     # full-match estimate via bootstrap, NOT tuned on public 5 min
+public_5min:                 # sanity check only, NEVER tuned on
   spellF1: 0.000
   spellF1_ci: [0.000, 0.000]
   macroF1: 0.000
+full_match_stats:            # label-free, no ground truth needed
   n_possessions: 0
-public_5min_sanity: pass     # pipeline check only
+  median_possession_s: 0.0
+  share: {H: 0.0, A: 0.0, D: 0.0, X: 0.0}
+  flicker_lt_1s: 0
 verdict: keep | drop | inconclusive
 notes: ""
 ```
 
 - `scripts/log_experiment.py` writes the file, and `make results` regenerates `experiments/RESULTS.md` (a sorted table).
 - **Aggregate numbers only.** Never per-frame predictions or anything that reconstructs the data.
+- **We have no full-match ground truth**, so no full-match score exists before results day. Records hold the public 5-minute score (sanity only) plus label-free stats over the whole match.
 - Differences below ~0.04 spellF1 are noise: compare CIs, not point estimates.
 - Seed entry: `E0`, official `baseline_smooth50`, spellF1 **0.2433**, macroF1 0.6724.
 
@@ -175,7 +189,7 @@ notes: ""
 ## 7. Reproducibility
 
 - **One command:** `make submission`. It writes `outputs/Falafelona.csv` and runs `validate_submission.py` on that exact file.
-- Pinned Python (3.12) and exact deps (`uv.lock`). Fixed seeds, no order-dependent parallelism.
+- Pinned Python (3.12) and exact deps (`requirements.txt`, tooling D10). Fixed seeds, no order-dependent parallelism.
 - `tests/test_determinism.py` runs the pipeline twice and checks for an identical SHA-256. The final hash goes in the README.
 - **Clean-clone test (15 Nov):** on a laptop that has never run the pipeline: fresh clone → `make setup` → `make submission` → same hash.
 
@@ -203,15 +217,16 @@ Anything we'd otherwise re-argue later gets a line in [`docs/decisions.md`](deci
 
 ---
 
-## 9. Build order (after this plan is merged)
+## 9. Build order (after this PR is merged)
+
+The skeleton files exist now. Next PRs fill them in:
 
 | # | PR | Workstream |
 |---|---|---|
-| 1 | `chore/int-repo-setup`: `.gitignore`, hooks, CLAUDE.md/AGENTS.md, AI ignore files, PR template, CI, labels | int |
-| 2 | `chore/int-add-challenge-submodule`: pinned submodule | int |
-| 3 | `chore/int-python-package`: `pyproject.toml`, `uv.lock`, `src/falafelona/` stubs, Makefile, test fixtures | int |
-| 4 | `feat/int-baseline-repro`: reproduce `baseline_smooth50` via `configs/baseline.yaml` (by 30 Oct) | int |
-| 5 | `chore/eval-experiment-log`: `experiments/`, `log_experiment.py`, `bootstrap_eval.py` | eval |
-| 6 | Set up the GitHub Projects board and move the tasks over as issues | int |
+| 1 | `chore/int-tooling`: real `pyproject.toml`, pinned requirements, Makefile, `vendor.py`, `config.py` | int |
+| 2 | `chore/int-no-data-guard`: `check_no_data.py`, pre-commit hook, `ci.yml`, its test | int |
+| 3 | `feat/int-baseline-repro`: `io.py`, `pipeline.py`, `cli.py`, `baseline.yaml` + baseline equivalence tests (by 30 Oct) | int |
+| 4 | `chore/eval-experiment-log`: `bootstrap_eval.py`, `log_experiment.py`, `make results` | eval |
+| 5 | GitHub settings (owner): labels via `scripts/setup_github.sh`, branch protection, push ruleset, Projects board + issues | int |
 
 Then the workstream branches (`feat/ball-…`, `feat/dead-…`, `feat/poss-…`) start in W1/W2.

@@ -1,0 +1,3 @@
+# Runtime dependencies, EXACT versions (==), including transitive ones.
+# Reproduction must give the identical file, so versions change only via a chore/ PR.
+# Planned: numpy, pandas, PyYAML (+ their dependencies). Tooling choice still open: D10.
