@@ -167,37 +167,6 @@ _Details and results are added here as they land. The full write-up goes in the 
 | **W2: 3–9 Nov** | Build the three components, first end-to-end file | First full-pipeline CSV passes the validator |
 | **W3: 10–16 Nov** | Combine, bootstrap, **freeze 14 Nov**, write the doc, clean-clone test | Form submitted on 16 Nov |
 
-### ✅ Tasks
-
-Source of truth: the **Falafelona Tasks** board in Notion. This is a snapshot.
-
-**W0: 22–26 Oct**
-- [ ] Kick-off call: agree on team name, workstream owners, weekly sync time (Everyone, 25 Oct)
-- [ ] Download the challenge data and share it privately with the team, not in git (25 Oct)
-- [ ] All 5 confirm they're registered with the **same** team name (Everyone, 26 Oct; hard deadline 10 Nov)
-- [ ] Read README, CHALLENGE, DATA, EVALUATION, SUBMISSION, RULES (Everyone, 26 Oct)
-- [ ] Repo skeleton: `.gitignore` for data, pinned requirements, README with one run command (26 Oct)
-
-**W1: 27 Oct – 2 Nov**
-- [ ] Everyone runs starter notebooks 01–03 on the real data (Everyone, 29 Oct)
-- [ ] Reproduce `baseline_smooth50` from our repo and validate it (30 Oct)
-- [ ] EDA: when and where the ball goes missing; gap length distribution (Ball track, 2 Nov)
-- [ ] EDA: dead-ball stretches in the public GT vs Smart Tagging set pieces (Dead ball, 2 Nov)
-- [ ] EDA: possession lengths in the public GT; transitions the baseline gets wrong (Possession, 2 Nov)
-- [ ] Set up the experiment log and a bootstrap scoring script (`--bootstrap 1000`) (Eval & docs, 2 Nov)
-
-**W2: 3–9 Nov**
-- [ ] Ball gap filling + removing false ball detections (Ball track, 9 Nov)
-- [ ] Dead-ball detector (Dead ball, 9 Nov)
-- [ ] Possession model: control features + HMM/Viterbi with minimum duration (Possession, 9 Nov)
-- [ ] First full-pipeline submission file, validated (9 Nov)
-
-**W3: 10–16 Nov**
-- [ ] 🧊 Code freeze: final pipeline chosen, no tuning on the public 5 min (Everyone, 14 Nov)
-- [ ] Technical document (Eval & docs, 15 Nov)
-- [ ] Clean-clone reproduction test: regenerates the identical CSV (15 Nov)
-- [ ] Submit `Falafelona.csv` + repo URL + `Falafelona.pdf` via the Google Form (16 Nov)
-
 ---
 
 ## 🧪 Experiments
