@@ -44,15 +44,15 @@ run(cfg) -> writes outputs/Falafelona.csv, returns {sha256, counts}
 
 | Role | Workstream | Owner | Helper | Profile | W0–W1 | W2 | W3 |
 |---|---|---|---|---|---|---|---|
-| **P1** | Integration & submission (`int`) | **Tala** | — | Infra, Python packaging, git | Tooling, guard, synthetic data, `io.py`, baseline repro | Maintenance + **help `dead`** | Freeze, clean-clone test, upload |
+| **P1** | Integration & submission (`int`) | **Tala** | — | Infra, Python packaging, git | Tooling, guard, synthetic data, `io.py`, baseline repro | Maintenance + **help `poss`** | Freeze, clean-clone test, upload |
 | **P2** | Ball track (`ball`) | **Abdallah** | — | Signal processing, numpy | EDA, outlier filter | Gap filling | Doc section |
-| **P3** | Dead ball (`dead`) | **Chikhani** | Tala | ⚽ **Knows football rules well** | EDA, baseline method | Rules + combining them | Joint decoding with `poss` (4.6) |
-| **P4** | Possession model (`poss`) | **Dudu + Abdallah** | Laila | Modelling / stats (⚽ helps) | Baseline + features | **HMM + min durations** | Tuning via CIs, doc section |
-| **P5** | Evaluation & docs (`eval`) | **Laila** | — | Metrics, writing | Eval tooling | Metric study, PR reviews, **help `poss`** | **Owns the technical doc** |
+| **P3** | Dead ball (`dead`) | **Chikhani** | Laila | ⚽ **Knows football rules well** | EDA, baseline method | Rules + combining them | Joint decoding with `poss` (4.6) |
+| **P4** | Possession model (`poss`) | **Dudu + Abdallah** | Tala | Modelling / stats (⚽ helps) | Baseline + features | **HMM + min durations** | Tuning via CIs, doc section |
+| **P5** | Evaluation & docs (`eval`) | **Laila** | — | Metrics, writing | Eval tooling | Metric study, PR reviews, **help `dead`** | **Owns the technical doc** |
 
-- **Tala** owns `int` and helps Chikhani on `dead` once the baseline is reproduced (from W2).
+- **Tala** owns `int` and helps Dudu and Abdallah on `poss` once the baseline is reproduced (from W2), e.g. the HMM decoder (4.3 / 4.4).
 - **Abdallah** owns `ball` and co-owns `poss` with Dudu. `ball` is front-loaded (W1–W2), so his time shifts to `poss` as the ball tasks finish.
-- **Laila** owns `eval/docs` and helps Dudu and Abdallah on `poss`. Her metric study (5.5) feeds straight into the `poss` decisions.
+- **Laila** owns `eval/docs` and helps Chikhani on `dead`, e.g. checking each dead-ball rule against the label-free stats and Smart Tagging.
 - **Abdallah and Chikhani work closely:** long ball gaps are a shared `ball`/`dead` signal. Agree the threshold in one short call in W1.
 
 ### ⚽ Where football knowledge matters
@@ -103,7 +103,7 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 2.6 | `exp(ball): estimate missing ball from player positions` (only if time allows) | 12 Nov | 2.4 | Experiment logged |
 | 2.7 | `docs(ball): technical doc section "Ball track"`, including methods dropped | 15 Nov | — | Section merged |
 
-### WS3 · Dead ball (`ws:dead`): Chikhani ⚽, helped by Tala
+### WS3 · Dead ball (`ws:dead`): Chikhani ⚽, helped by Laila
 **Owns:** `deadball.py`, the `deadball:` config section.
 **Mission:** decide which frames are `D`. Dead spells are scored like any other, so their **boundaries** matter as much as their coverage.
 
@@ -118,7 +118,7 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 3.7 | `feat(dead): combine rules into one score + min-duration smoothing` (no 3-frame `D` blips) | 10 Nov | 3.4–3.6 | Experiment logged, CI vs baseline |
 | 3.8 | `docs(dead): technical doc section on dead ball and restarts` | 15 Nov | — | Section merged |
 
-### WS4 · Possession model (`ws:poss`): Dudu + Abdallah, helped by Laila
+### WS4 · Possession model (`ws:poss`): Dudu + Abdallah, helped by Tala
 **Owns:** `possession.py`, the `possession:` config section.
 **Mission:** turn per-frame evidence into **few, long, correct** H/A spells. spellF1 is mostly about removing flicker.
 
