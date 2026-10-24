@@ -156,6 +156,8 @@ _Details and results are added here as they land. The full write-up goes in the 
 | 4 | Possession model (`H`/`A`) | _TBD_ | Control features, HMM/Viterbi, min durations |
 | 5 | Evaluation & docs | _TBD_ | Experiment log, bootstrap CIs, technical document |
 
+The full split (people, interfaces, every task with due date and "done when", ready to become issues) is in [docs/workstreams.md](docs/workstreams.md).
+
 ---
 
 ## 🗓 Plan
@@ -183,7 +185,7 @@ Saved in the repo: one YAML per run in `experiments/runs/` (aggregate metrics on
 
 - `main` is always runnable. Work on a branch named `<type>/<ws>-<short-desc>` (e.g. `feat/ball-kalman-gapfill`) and open a PR using the template.
 - One review before merging, then squash-merge. The reviewer checks that no data and no data extracts are included.
-- Tasks live on the **GitHub Projects board**. Updates go in the group chat (async stand-up: *done · next · blocked*).
+- Tasks live on the **GitHub Projects board**, one issue per task in [docs/workstreams.md](docs/workstreams.md). Updates go in the group chat (async stand-up: *done · next · blocked*).
 - **Integration check every Friday** (Saturday as fallback). **Freeze meeting Sat 14 Nov.**
 - Decisions are recorded in [docs/decisions.md](docs/decisions.md). The full workflow is in [docs/skeleton-plan.md](docs/skeleton-plan.md).
 
