@@ -150,11 +150,11 @@ _Details and results are added here as they land. The full write-up goes in the 
 
 | # | Workstream | Owner | Scope |
 |---|---|---|---|
-| 1 | Integration & submission | _TBD_ | Repo, pipeline, validation, reproducibility, final upload |
-| 2 | Ball track | _TBD_ | Gap filling, false-detection filtering |
-| 3 | Dead ball (`D`) | _TBD_ | Out of bounds, static players, set pieces/restarts |
-| 4 | Possession model (`H`/`A`) | _TBD_ | Control features, HMM/Viterbi, min durations |
-| 5 | Evaluation & docs | _TBD_ | Experiment log, bootstrap CIs, technical document |
+| 1 | Integration & submission | Tala | Repo, pipeline, validation, reproducibility, final upload |
+| 2 | Ball track | Abdallah | Gap filling, false-detection filtering |
+| 3 | Dead ball (`D`) | Chikhani (+ Tala) | Out of bounds, static players, set pieces/restarts |
+| 4 | Possession model (`H`/`A`) | Dudu, Abdallah (+ Laila) | Control features, HMM/Viterbi, min durations |
+| 5 | Evaluation & docs | Laila | Experiment log, bootstrap CIs, technical document |
 
 The full split (people, interfaces, every task with due date and "done when", ready to become issues) is in [docs/workstreams.md](docs/workstreams.md).
 

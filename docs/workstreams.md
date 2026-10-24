@@ -1,6 +1,6 @@
 # 👥 Workstreams: who does what
 
-How the work is split across the five of us. Every task below becomes **one GitHub issue** on the Projects board (title, `ws:` label, due date and "done when" are already written). Owners are agreed at the kick-off.
+How the work is split across the five of us. Every task below becomes **one GitHub issue** on the Projects board (title, `ws:` label, due date and "done when" are already written). Owners are in §1.
 Layout, git workflow and rhythm are in [`skeleton-plan.md`](skeleton-plan.md); decisions in [`decisions.md`](decisions.md).
 
 ---
@@ -42,16 +42,18 @@ run(cfg) -> writes outputs/Falafelona.csv, returns {sha256, counts}
 
 ## 1. The split
 
-| Person | Workstream | Profile | W0–W1 | W2 | W3 |
-|---|---|---|---|---|---|
-| **P1** | Integration & submission (`int`) | Infra, Python packaging, git | Tooling, guard, synthetic data, `io.py`, baseline repro | Maintenance + **pair on `poss`** (4.3 / 4.4) | Freeze, clean-clone test, upload |
-| **P2** | Ball track (`ball`) | Signal processing, numpy | EDA, outlier filter | Gap filling | Doc section, help `eval` |
-| **P3** | Dead ball (`dead`) | ⚽ **Knows football rules well** | EDA, baseline method | Rules + combining them | Joint decoding with `poss` (4.6) |
-| **P4** | Possession model (`poss`) | Modelling / stats (⚽ helps) | Baseline + features | **HMM + min durations** | Tuning via CIs, doc section |
-| **P5** | Evaluation & docs (`eval`) | Metrics, writing | Eval tooling | Metric study, PR reviews | **Owns the technical doc** |
+| Role | Workstream | Owner | Helper | Profile | W0–W1 | W2 | W3 |
+|---|---|---|---|---|---|---|---|
+| **P1** | Integration & submission (`int`) | **Tala** | — | Infra, Python packaging, git | Tooling, guard, synthetic data, `io.py`, baseline repro | Maintenance + **help `dead`** | Freeze, clean-clone test, upload |
+| **P2** | Ball track (`ball`) | **Abdallah** | — | Signal processing, numpy | EDA, outlier filter | Gap filling | Doc section |
+| **P3** | Dead ball (`dead`) | **Chikhani** | Tala | ⚽ **Knows football rules well** | EDA, baseline method | Rules + combining them | Joint decoding with `poss` (4.6) |
+| **P4** | Possession model (`poss`) | **Dudu + Abdallah** | Laila | Modelling / stats (⚽ helps) | Baseline + features | **HMM + min durations** | Tuning via CIs, doc section |
+| **P5** | Evaluation & docs (`eval`) | **Laila** | — | Metrics, writing | Eval tooling | Metric study, PR reviews, **help `poss`** | **Owns the technical doc** |
 
-- `int` is heavy early and `eval/docs` heavy late, so P1 moves onto `poss` in W2 and P2 helps `eval` in W3.
-- **P2 and P3 work closely:** long ball gaps are a shared signal. Agree the threshold in one short call in W1.
+- **Tala** owns `int` and helps Chikhani on `dead` once the baseline is reproduced (from W2).
+- **Abdallah** owns `ball` and co-owns `poss` with Dudu. `ball` is front-loaded (W1–W2), so his time shifts to `poss` as the ball tasks finish.
+- **Laila** owns `eval/docs` and helps Dudu and Abdallah on `poss`. Her metric study (5.5) feeds straight into the `poss` decisions.
+- **Abdallah and Chikhani work closely:** long ball gaps are a shared `ball`/`dead` signal. Agree the threshold in one short call in W1.
 
 ### ⚽ Where football knowledge matters
 
@@ -62,7 +64,7 @@ run(cfg) -> writes outputs/Falafelona.csv, returns {sha256, counts}
 | **P5 eval** | Medium | Plausibility checks (number of possessions, H/A split); writing the "Possession rules" section for Metrica / Barça judges |
 | P1 int, P2 ball | Low | Engineering and physics |
 
-If only one of us knows football well, they take **P3** and act as **football reviewer on every `poss` PR**. Whoever takes P3/P4 reads the official **CHALLENGE.md possession definitions** first: the labels follow Metrica's rules, not general intuition. Watching the public 5 minutes next to its 17 labelled possessions is fine for *understanding* the convention, never for tuning (D9).
+Chikhani (P3) also acts as **football reviewer on every `poss` PR**. Chikhani, Dudu and Abdallah read the official **CHALLENGE.md possession definitions** first: the labels follow Metrica's rules, not general intuition. Watching the public 5 minutes next to its 17 labelled possessions is fine for *understanding* the convention, never for tuning (D9).
 
 ---
 
@@ -70,7 +72,7 @@ If only one of us knows football well, they take **P3** and act as **football re
 
 Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for experiments. Weeks: **W0** 22–26 Oct · **W1** 27 Oct – 2 Nov · **W2** 3–9 Nov · **W3** 10–16 Nov.
 
-### WS1 · Integration & submission (`ws:int`), P1
+### WS1 · Integration & submission (`ws:int`): Tala
 **Owns:** `vendor.py`, `config.py`, `io.py`, `pipeline.py`, `cli.py`, `Makefile`, no-data guard, CI, `test_format` / `test_determinism` / `test_baseline_equivalence`, GitHub settings, final upload.
 **Mission:** `main` always produces a valid file with one command, reproducible bit for bit by anyone.
 
@@ -87,7 +89,7 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 1.9 | `chore(int): freeze + clean-clone test`: tag `v1.0-freeze`, SHA-256 + runtime in README | 14–15 Nov | all | Fresh clone gives the same SHA-256 |
 | 1.10 | `chore(int): registration + submission`: all 5 registered as `Falafelona`, Google Form | **10 Nov** · 16 Nov | — | Form submitted, file validated |
 
-### WS2 · Ball track (`ws:ball`), P2
+### WS2 · Ball track (`ws:ball`): Abdallah
 **Owns:** `ball.py`, the `ball:` config section, `notebooks/ball-*.ipynb`.
 **Mission:** a trustworthy ball position on as many frames as possible, and a clear "unknown" everywhere else.
 
@@ -101,7 +103,7 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 2.6 | `exp(ball): estimate missing ball from player positions` (only if time allows) | 12 Nov | 2.4 | Experiment logged |
 | 2.7 | `docs(ball): technical doc section "Ball track"`, including methods dropped | 15 Nov | — | Section merged |
 
-### WS3 · Dead ball (`ws:dead`), P3 ⚽
+### WS3 · Dead ball (`ws:dead`): Chikhani ⚽, helped by Tala
 **Owns:** `deadball.py`, the `deadball:` config section.
 **Mission:** decide which frames are `D`. Dead spells are scored like any other, so their **boundaries** matter as much as their coverage.
 
@@ -116,7 +118,7 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 3.7 | `feat(dead): combine rules into one score + min-duration smoothing` (no 3-frame `D` blips) | 10 Nov | 3.4–3.6 | Experiment logged, CI vs baseline |
 | 3.8 | `docs(dead): technical doc section on dead ball and restarts` | 15 Nov | — | Section merged |
 
-### WS4 · Possession model (`ws:poss`), P4 (+ P1 from W2)
+### WS4 · Possession model (`ws:poss`): Dudu + Abdallah, helped by Laila
 **Owns:** `possession.py`, the `possession:` config section.
 **Mission:** turn per-frame evidence into **few, long, correct** H/A spells. spellF1 is mostly about removing flicker.
 
@@ -127,11 +129,11 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 | 4.3 | `feat(poss): HMM / Viterbi decoder` with H/A states and a switch penalty (simple version first) | 6 Nov | 4.2 | Experiment logged; fewer possessions than baseline |
 | 4.4 | `exp(poss): minimum possession durations` (chained sub-states or post-merge of short spells) | 8 Nov | 4.3 | Compared by CI; keep or drop |
 | 4.5 | `feat(poss): carry the last confident team through ball gaps` | 9 Nov | 4.3 | Experiment logged |
-| 4.6 | `exp(poss): joint H/A/D decoding with the dead-ball score` (with P3) | 12 Nov | 3.7, 4.3 | Compared by CI; decision recorded |
+| 4.6 | `exp(poss): joint H/A/D decoding with the dead-ball score` (with Chikhani) | 12 Nov | 3.7, 4.3 | Compared by CI; decision recorded |
 | 4.7 | `docs(poss): X policy decision` (probably never use `X`: it costs macroF1 and only forward-fills for spellF1) | 7 Nov | 5.5 | Line in `decisions.md` |
 | 4.8 | `docs(poss): technical doc sections "Approach" and "Possession rules"` | 15 Nov | — | Sections merged |
 
-### WS5 · Evaluation & docs (`ws:eval`), P5
+### WS5 · Evaluation & docs (`ws:eval`): Laila
 **Owns:** `bootstrap_eval.py`, `log_experiment.py`, `experiments/`, `docs/Falafelona.md`, `decisions.md`.
 **Mission:** tell the team whether a change is actually better, without full-match ground truth. Own the final document.
 
@@ -172,4 +174,4 @@ Issue title = the task title. Labels: the `ws:` label, plus `type:exp` for exper
 16 Nov  submit
 ```
 
-If 1.5 slips past 30 Oct, everything shifts: P5 moves onto `io.py` for a few days (eval tooling can wait).
+If 1.5 slips past 30 Oct, everything shifts: Laila moves onto `io.py` for a few days (eval tooling can wait).
