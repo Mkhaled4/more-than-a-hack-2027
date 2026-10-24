@@ -3,7 +3,7 @@
 Team **Falafelona**'s entry for [More Than a Hack 2027](https://landing.mobileworldcapital.com/more-than-a-hack-2027)
 (Metrica Sports × FC Barcelona / Barça Innovation Hub × Mobile World Capital Barcelona, Talent Arena).
 
-**Team:** Tala · Chikhani · Dudu · Laila · Abdallah
+**Team:** Chikhani · Tala · Dudu · Laila · Abdallah
 
 > **Status:** 🟡 Week 0 (setup) · **Our best spellF1:** — · **Baseline to beat:** **0.2433**
 
