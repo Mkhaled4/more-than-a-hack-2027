@@ -150,11 +150,13 @@ _Details and results are added here as they land. The full write-up goes in the 
 
 | # | Workstream | Owner | Scope |
 |---|---|---|---|
-| 1 | Integration & submission | _TBD_ | Repo, pipeline, validation, reproducibility, final upload |
-| 2 | Ball track | _TBD_ | Gap filling, false-detection filtering |
-| 3 | Dead ball (`D`) | _TBD_ | Out of bounds, static players, set pieces/restarts |
-| 4 | Possession model (`H`/`A`) | _TBD_ | Control features, HMM/Viterbi, min durations |
-| 5 | Evaluation & docs | _TBD_ | Experiment log, bootstrap CIs, technical document |
+| 1 | Integration & submission | Tala | Repo, pipeline, validation, reproducibility, final upload |
+| 2 | Ball track | Abdallah | Gap filling, false-detection filtering |
+| 3 | Dead ball (`D`) | Chikhani (+ Laila) | Out of bounds, static players, set pieces/restarts |
+| 4 | Possession model (`H`/`A`) | Dudu, Abdallah (+ Tala) | Control features, HMM/Viterbi, min durations |
+| 5 | Evaluation & docs | Laila | Experiment log, bootstrap CIs, technical document |
+
+The full split (people, interfaces, every task with due date and "done when", ready to become issues) is in [docs/workstreams.md](docs/workstreams.md).
 
 ---
 
@@ -171,7 +173,7 @@ _Details and results are added here as they land. The full write-up goes in the 
 
 ## 🧪 Experiments
 
-Logged in the **Experiment Log** in Notion. Each entry has: ID · git commit · what changed · spellF1 (± bootstrap CI) · macroF1 · notes.
+Saved in the repo: one YAML per run in `experiments/runs/` (aggregate metrics only), summarised in `experiments/RESULTS.md`. Each entry has: ID · git commit · what changed · spellF1 (± bootstrap CI) · macroF1 · notes. See [docs/skeleton-plan.md](docs/skeleton-plan.md#6-experiments-saved-in-the-repo).
 
 | ID | Change | spellF1 | macroF1 | Notes |
 |---|---|---|---|---|
@@ -181,9 +183,11 @@ Logged in the **Experiment Log** in Notion. Each entry has: ID · git commit · 
 
 ## 🤝 Working together
 
-- `main` is always runnable. Work on a branch and open a PR.
-- One review before merging. The reviewer checks that no data and no data extracts are included.
-- Weekly sync: _TBD (agreed at kick-off)_.
+- `main` is always runnable. Work on a branch named `<type>/<ws>-<short-desc>` (e.g. `feat/ball-kalman-gapfill`) and open a PR using the template.
+- One review before merging, then squash-merge. The reviewer checks that no data and no data extracts are included.
+- Tasks live on the **GitHub Projects board**, one issue per task in [docs/workstreams.md](docs/workstreams.md). Updates go in the group chat (async stand-up: *done · next · blocked*).
+- **Integration check every Friday** (Saturday as fallback). **Freeze meeting Sat 14 Nov.**
+- Decisions are recorded in [docs/decisions.md](docs/decisions.md). The full workflow is in [docs/skeleton-plan.md](docs/skeleton-plan.md).
 
 ---
 

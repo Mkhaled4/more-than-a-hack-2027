@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/mtah-data/**)",
+      "Read(/Volumes/mtah-data/**)",
+      "Read(./data/**)",
+      "Read(./cache/**)",
+      "Read(./outputs/**)",
+      "Read(**/*.mp4)",
+      "Read(**/*_atd.txt)",
+      "Read(**/*_atd.xml)",
+      "Read(**/*_smart_tagging.xml)",
+      "Read(**/*_homography.csv)",
+      "Read(**/*_possession_gt*.csv)",
+      "Read(**/*.pkl)",
+      "Read(**/*.npz)",
+      "Bash(make submission:*)",
+      "Bash(make check-baseline:*)",
+      "Bash(make eval:*)",
+      "Bash(python -m falafelona run:*)"
+    ]
+  }
+}
