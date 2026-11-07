@@ -8,3 +8,25 @@
 # - fail with a clear message if the submodule is missing ("git submodule update --init")
 #
 # Never copy or edit the organisers' code (docs/decisions.md D3).
+
+
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]   # see note below
+CHALLENGE = REPO / "vendor" / "challenge"
+
+if not (CHALLENGE / "games.py").exists():
+    raise RuntimeError(
+        f"Challenge submodule missing at {CHALLENGE}. Run: git submodule update --init"
+    )
+
+for p in (CHALLENGE, CHALLENGE / "starter"):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+import games
+import load_atd
+import load_smart_tagging
+import load_homography
+import baseline
