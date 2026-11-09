@@ -40,6 +40,7 @@ def as_match(xy, period, speed=9.0):
         players_xy=np.full((n, 0, 2), np.nan),
         players_speed=np.full((n, 0), np.nan),
         slot_team=np.array([], dtype="<U1"),
+        pitch=(105.3, 68.0),
     )
 
 
