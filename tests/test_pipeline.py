@@ -16,14 +16,24 @@ def test_stage_classes_import_from_the_package():
     assert Possession.__init__.__annotations__["data"] is Match
 
 
-def test_run_wires_the_stages(bundle):
+def test_run_wires_the_stages(bundle, tmp_path):
     cfg = load_config(io.vendor.REPO_ROOT / "configs" / "baseline.yaml")
-    out = pipeline.run(cfg, n_frames=bundle["n_frames"])
+    out = pipeline.run(cfg, tmp_path / "out.csv", n_frames=bundle["n_frames"])
 
     assert isinstance(out["match"], io.Match)
     assert out["cleaned"] is out["match"]  # method none: no cleaning yet
-    assert isinstance(out["possession"], Possession)
-    assert out["possession"].data is out["cleaned"]
+    assert out["dead_score"].shape == (bundle["n_frames"],)
+    assert out["labels"].shape == (bundle["n_frames"],)
+    assert out["path"].is_file()
+
+
+def test_dead_frames_give_no_team_vote(bundle, tmp_path):
+    # Inside the synthetic ball gap the dead score is 1, so with no smoothing the label is D.
+    cfg = load_config(io.vendor.REPO_ROOT / "configs" / "baseline.yaml")
+    cfg["possession"]["window"] = 0
+    out = pipeline.run(cfg, tmp_path / "out.csv", n_frames=bundle["n_frames"])
+    lo, hi = bundle["ball_gap"]
+    assert (out["labels"][lo:hi] == "D").all()
 
 
 def test_speeds_are_loaded(bundle):

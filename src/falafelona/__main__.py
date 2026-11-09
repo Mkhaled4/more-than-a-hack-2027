@@ -1,1 +1,4 @@
-# Entry point for `python -m falafelona`. Will just call falafelona.cli.main().
+# Entry point for `python -m falafelona`.
+from falafelona.cli import main
+
+raise SystemExit(main())

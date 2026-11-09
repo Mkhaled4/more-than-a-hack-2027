@@ -86,3 +86,23 @@ class Possession:
         """Official baseline: nearest player, then a +/- `window` majority vote."""
         codes, _ = self.nearest_player_labels()
         return self.smooth(codes, window)
+
+
+def predict(match: Match, ball, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
+    """What pipeline.py calls (docs/architecture.md): H / A / D per frame.
+
+    `match` is the cleaned Match from ball.py, so its ball_xy already holds the cleaned track.
+    `ball` (the BallTrack) is accepted for the interface but not used by nearest_majority.
+    Frames whose dead score is >= dead_threshold give no team vote, then the centred majority
+    vote of +/- window frames runs. Both numbers come from the `possession:` config section.
+    """
+    section = cfg["possession"]
+    method = section["method"]
+    if method != "nearest_majority":
+        raise ValueError(f"unknown possession method {method!r}; available: nearest_majority")
+
+    possession = Possession(match)
+    codes, _ = possession.nearest_player_labels()
+    dead = np.asarray(dead_score) >= section["dead_threshold"]
+    codes = np.where(dead, Possession.NOBODY, codes).astype(np.int8)
+    return possession.smooth(codes, section["window"])
