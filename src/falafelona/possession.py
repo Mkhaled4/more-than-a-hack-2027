@@ -89,7 +89,7 @@ class Possession:
         codes, _ = self.nearest_player_labels()
         return self.smooth(codes, window)
 
-    # ------------------------------------------------------------------ output
+
     @staticmethod
     def write_submission(path: str, labels: np.ndarray) -> str:
         """A frame,label CSV -- the whole submission format."""
