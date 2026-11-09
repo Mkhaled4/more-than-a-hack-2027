@@ -50,6 +50,7 @@ class Match:
     players_xy: np.ndarray   # float[n, n_slots, 2], NaN where a slot is empty
     players_speed: np.ndarray  # float[n, n_slots], speed field as given, NaN where empty
     slot_team: np.ndarray    # str[n_slots]: 'H' / 'A' / '?'
+    pitch: tuple[float, float]
     tags: list = field(default_factory=list)   # Smart Tagging, added in task 1.7
 
 
@@ -189,6 +190,7 @@ def load_match(game=games.GAME, n_frames=None, use_cache=True):
         players_xy=players_xy,
         players_speed=players_speed,
         slot_team=slot_team,
+        pitch=games.GAMES[game]["pitch"],
     )
 
 
