@@ -23,5 +23,5 @@ def run(cfg, n_frames=None):
     data_cleaner = DataCleaner(raw_match_data)
     cleaned_data = data_cleaner.return_cleaned_data()
     possession_calc = Possession(cleaned_data)
-    possession_calc.write_variants(r"C:\Users\mohna\Desktop\BarcaHackathon\mtah-data")
+    possession_calc.nearest_majority()
     return {"match": raw_match_data, "cleaned": cleaned_data, "possession": possession_calc}
