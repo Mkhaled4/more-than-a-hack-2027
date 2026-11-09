@@ -105,7 +105,7 @@ class Possession:
             os.makedirs(folder)
         with open(path, "w") as handle:
             handle.write("frame,label\n")
-            handle.writelines("{},{}\n".format(frame, label)
+            handle.writelines(f"{frame},{label}\n"
                               for frame, label in enumerate(labels))
         return path
 
@@ -114,18 +114,17 @@ class Possession:
 
         Step 1 runs once; only the cheap smoothing is repeated per window.
         """
-        variants = ([("baseline_smooth{}".format(w) if w else "baseline_raw", w)
+        variants = ([(f"baseline_smooth{w}" if w else "baseline_raw", w)
                      for w in windows] if windows else list(VARIANTS))
 
         codes, _ = self.nearest_player_labels()
         seen = int(np.sum(codes != self.NOBODY))
-        print("ball located on {} of {} frames ({:.1f}%)\n".format(
-            seen, len(codes), 100.0 * seen / len(codes)))
+        print(f"ball located on {seen} of {len(codes)} frames ({100.0 * seen / len(codes):.1f}%)\n")
 
         paths = []
         for name, window in variants:
             labels = self.smooth(codes, window)
-            path = self.write_submission(os.path.join(out_dir, "{}.csv".format(name)), labels)
+            path = self.write_submission(os.path.join(out_dir, f"{name}.csv"), labels)
             counts = {label: int(np.sum(labels == label)) for label in LABELS}
             print("{:<20} window +/-{:<4} H {:>6}  A {:>6}  D {:>6}  -> {}".format(
                 name, window, counts["H"], counts["A"], counts["D"], path))
