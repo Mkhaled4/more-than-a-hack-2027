@@ -36,7 +36,6 @@ class Possession:
     def __init__(self, data: Match):
         self.data = data
 
-    # ------------------------------------------------------------------ step 1: nearest player
     def nearest_player_labels(self) -> tuple[np.ndarray, np.ndarray]:
         """Per-frame team of the player closest to the ball: HOME / AWAY / NOBODY.
 
@@ -47,11 +46,7 @@ class Possession:
         slot = np.asarray(self.data.slot_team)
         team_of_track = np.select([slot == "H", slot == "A"], [self.HOME, self.AWAY], self.NOBODY)
 
-        scale = np.asarray(self.data.pitch, dtype=np.float32)  # turn 0-1 into metres,
-        players_m = players * scale  # otherwise the short axis
-        ball_m = ball * scale  # counts as long as the long one
-
-        diff = players_m - ball_m[:, None, :]  # (frames, tracks, 2)
+        diff = players - ball[:, None, :]  # (frames, tracks, 2)
         dist2 = np.sum(diff * diff, axis=2)  # squared distance, NaN if missing
 
         dist2 = np.where(np.isnan(dist2), np.inf, dist2)  # missing -> "infinitely far"
@@ -63,7 +58,6 @@ class Possession:
         distance = np.where(found, np.sqrt(best), np.nan).astype(np.float32)
         return codes, distance
 
-    # ------------------------------------------------------------------ step 2: majority vote
     def smooth(self, codes: np.ndarray, window: int) -> np.ndarray:
         """Majority vote over a centred window of +/- `window` frames. D where nobody has the ball.
 
@@ -90,7 +84,6 @@ class Possession:
         labels[seen] = np.where(home[seen] >= away[seen], "H", "A")
         return labels
 
-    # ------------------------------------------------------------------ the method
     def nearest_majority(self, window: int = 50) -> np.ndarray:
         """Official baseline: nearest player, then a +/- `window` majority vote."""
         codes, _ = self.nearest_player_labels()

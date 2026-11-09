@@ -12,7 +12,7 @@ from falafelona.io import load_match
 from falafelona.possession import Possession
 
 
-def run(cfg, n_frames=None):
+def run(cfg= None, n_frames=None):
     """Run the stages in order (PR #9 structure). Nothing happens at import time.
 
     Not finished (task 1.5): the dead-ball stage, the H/A/D labels, the X policy and the CSV
@@ -25,3 +25,5 @@ def run(cfg, n_frames=None):
     possession_calc = Possession(cleaned_data)
     possession_calc.write_variants(r"C:\Users\mohna\Desktop\BarcaHackathon\mtah-data")
     return {"match": raw_match_data, "cleaned": cleaned_data, "possession": possession_calc}
+
+run()
