@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from falafelona import deadball, possession
+from falafelona import deadball, possession, vendor
 from falafelona.ball import DataCleaner
 from falafelona.io import load_match
 from falafelona.vendor import games
@@ -31,17 +31,12 @@ def apply_x_policy(labels, match, cfg):
 
 
 def write_submission(path, labels):
-    """Write the frame,label CSV and return its SHA-256.
+    """Write the frame,label CSV with the organisers' own writer, then return its SHA-256.
 
-    Same bytes as the organisers' starter/baseline.py writes: header, then "frame,label\\n" per
-    row, frames from 0.
+    Using starter/baseline.py's write_submission means our format is theirs by construction.
     """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = "frame,label\n" + "".join(f"{frame},{label}\n" for frame, label in enumerate(labels))
-    data = text.encode()
-    path.write_bytes(data)
-    return hashlib.sha256(data).hexdigest()
+    vendor.baseline.write_submission(str(path), labels)
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def label_counts(labels):

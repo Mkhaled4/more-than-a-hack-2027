@@ -34,12 +34,30 @@ for _path in (str(CHALLENGE_DIR), str(EVALUATION_DIR)):
 import games
 import possession_metrics
 
+
+def _load_baseline():
+    """starter/baseline.py as a module. It is a script, not a package, so it is loaded by path.
+
+    Importing it only defines functions: its __main__ block, which reads the data, does not run.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("official_baseline", OFFICIAL_BASELINE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The organisers' reference baseline. We use its write_submission so our CSV format is theirs.
+baseline = _load_baseline()
+
 __all__ = [
     "CHALLENGE_DIR",
     "EVALUATION_DIR",
     "OFFICIAL_BASELINE",
     "REPO_ROOT",
     "VALIDATOR",
+    "baseline",
     "games",
     "possession_metrics",
 ]

@@ -4,8 +4,6 @@
 - `official_baseline` (task 1.5): vendor/challenge/starter/baseline.py, imported unchanged
 """
 
-import importlib.util
-
 import pytest
 from synthetic import write_bundle
 
@@ -15,10 +13,7 @@ from falafelona import vendor
 @pytest.fixture(scope="session")
 def official_baseline():
     """The organisers' starter/baseline.py as a module, imported from the submodule unchanged."""
-    spec = importlib.util.spec_from_file_location("official_baseline", vendor.OFFICIAL_BASELINE)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # only defines functions; its __main__ block does not run
-    return module
+    return vendor.baseline
 
 
 @pytest.fixture
