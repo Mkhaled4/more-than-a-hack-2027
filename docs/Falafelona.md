@@ -18,6 +18,17 @@ How we clean the ball: false detections removed, gaps filled, and methods we tri
 Owner: Chikhani (task 3.8)
 How the dead-ball score is built and how restarts are found.
 
+Draft notes (to be written up by 15 Nov):
+- The dead-ball stage gives every frame a score from 0 (alive) to 1 (dead). It is evidence for the
+  H/A/D decoder, not a final answer (D13). The method is chosen in the `deadball:` section of the config.
+- `ball_missing` (the official baseline): dead wherever the tracking has no ball. Simple, but the ball
+  is also missing in live play, so it calls far too much dead ball.
+- `out_of_bounds`: dead where the ball is past a touchline or goal line by more than `out_margin`
+  (1 m for now). The margin is there because tracking is noisy near the lines, and a ball on the line
+  is still in play. A missing ball scores 0 here: not seeing the ball says nothing about where it is.
+- Still to come: players standing still, Smart Tagging restarts, the second-half kickoff, and one
+  combined score.
+
 ## 2. Assets used (and dropped)
 Owner: Tala
 Which provided files we use (tracking, Smart Tagging, homography, video) and which we don't, and why.
