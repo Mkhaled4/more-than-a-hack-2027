@@ -12,8 +12,6 @@
 #
 # Methods are selected via the `possession:` section of the config.
 
-import os
-
 import numpy as np
 
 from falafelona.io import Match
