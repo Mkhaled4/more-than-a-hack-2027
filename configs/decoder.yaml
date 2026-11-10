@@ -1,0 +1,18 @@
+# Hysteresis decoder: keeps the current owner and only switches once the other team
+# has been nearest for switch_frames frames in a row (back-dated to where that run began).
+# Same ball and deadball stages as baseline_smooth50, so only the possession step differs.
+seed: 0
+
+ball:
+  method: none            # no gap filling, no rejection
+
+deadball:
+  method: ball_missing    # score 1 wherever the ball is not observed, else 0
+
+possession:
+  method: decoder
+  switch_frames: 15       # frames the challenger must stay nearest before a switch (25 = 1 s)
+  dead_threshold: 0.5     # frames with dead score >= this are always D
+
+output:
+  x_policy: none          # D14 still proposed: no X written yet

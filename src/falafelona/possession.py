@@ -87,8 +87,56 @@ class Possession:
         codes, _ = self.nearest_player_labels()
         return self.smooth(codes, window)
 
+    def decoder(self, codes: np.ndarray, dead_mask: np.ndarray | None = None,
+                switch_frames: int = 15) -> np.ndarray:
+        """Hysteresis decoder: keeps the current owner instead of voting over a window.
 
-def predict(match: Match, ball, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
+        Walks the frames in order and remembers who has the ball. The other team only takes
+        over once it has been nearest for `switch_frames` frames in a row (ball-missing frames
+        neither count towards nor break that run); the switch is then back-dated to where the
+        run started, so real hand-overs are not reported late. Ball-missing frames keep the
+        previous owner; D comes only from `dead_mask`. After a D, the first team seen takes
+        the ball straight away.
+
+        dead_mask     : True on frames the dead-ball detector flags; these are always D.
+        switch_frames : frames the challenger must stay nearest before possession changes
+                        (25 frames = 1 s at 25 fps).
+        """
+        codes = np.asarray(codes)
+        dead = len(LABELS) - 1  # index of "D" in LABELS
+        out = np.full(len(codes), dead, dtype=np.int8)  # indices into LABELS: 0=H, 1=A, 2=D
+        owner = dead  # start as dead ball
+        run_team, run_start, run_len = None, 0, 0  # challenger currently trying to take over
+
+        for i, c in enumerate(codes):
+            if dead_mask is not None and dead_mask[i]:  # detected stoppage: always D
+                out[i] = dead
+                owner = dead
+                run_team, run_len = None, 0
+                continue
+
+            if c == self.NOBODY:  # ball not visible: keep the current owner
+                out[i] = owner
+                continue
+
+            if owner == dead:  # restart after dead ball: take it immediately
+                owner = c
+                run_team, run_len = None, 0
+            elif c == owner:
+                run_team, run_len = None, 0  # owner confirmed, cancel challenger
+            else:
+                if run_team != c:
+                    run_team, run_start, run_len = c, i, 0
+                run_len += 1
+                if run_len >= switch_frames:  # challenger held long enough: switch,
+                    out[run_start:i] = c  # back-dated to when the run began
+                    owner = c
+                    run_team, run_len = None, 0
+            out[i] = owner
+
+        return np.array(LABELS)[out]
+
+def predict(match: Match, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
     """What pipeline.py calls (docs/architecture.md): H / A / D per frame.
 
     `match` is the cleaned Match from ball.py, so its ball_xy already holds the cleaned track.
@@ -98,11 +146,15 @@ def predict(match: Match, ball, dead_score: np.ndarray, cfg: dict) -> np.ndarray
     """
     section = cfg["possession"]
     method = section["method"]
-    if method != "nearest_majority":
-        raise ValueError(f"unknown possession method {method!r}; available: nearest_majority")
 
     possession = Possession(match)
     codes, _ = possession.nearest_player_labels()
     dead = np.asarray(dead_score) >= section["dead_threshold"]
+    if method == "decoder":
+        return possession.decoder(
+            codes,
+            dead_mask=dead,
+            switch_frames=section.get("switch_frames", 15),
+        )
     codes = np.where(dead, Possession.NOBODY, codes).astype(np.int8)
     return possession.smooth(codes, section["window"])
