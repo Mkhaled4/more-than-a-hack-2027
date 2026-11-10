@@ -7,6 +7,14 @@
 import pytest
 from synthetic import write_bundle
 
+from falafelona import vendor
+
+
+@pytest.fixture(scope="session")
+def official_baseline():
+    """The organisers' starter/baseline.py as a module, imported from the submodule unchanged."""
+    return vendor.baseline
+
 
 @pytest.fixture
 def bundle(tmp_path, monkeypatch):
