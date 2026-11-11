@@ -12,3 +12,24 @@ Every run that changes the output gets one row in [RESULTS.md](RESULTS.md). **Ag
 | Verdict | `keep`, `drop` or `inconclusive` |
 
 Differences below about 0.04 spellF1 are noise.
+
+## Running on the dev set (IDSSE)
+
+The dev set is the seven open IDSSE matches (Bassek et al., *Scientific Data* 12, 195, 2025; approved by the organisers in official issue #16). `scripts/devset_eval.py` reads them, cuts gaps into the ball track so it looks like ours, runs the pipeline with each config and scores it with the official metric. Humans run it, in a terminal with no AI tool open, like the other scripts that read match data. It prints totals only.
+
+**One-time setup**
+
+1. Download the seven matches (Figshare, or the Hugging Face mirror `pysport/idsse-data`) into a folder **outside the repo**, for example `~/idsse-data`. Per match you need the match information XML and the positions XML. Both a flat folder and one folder per match work.
+2. `export IDSSE_DATA_DIR=~/idsse-data`
+3. Check that the files load: `.venv/bin/python scripts/devset_eval.py --summary`. It prints shapes and label counts per match. If it stops with an error about an element or attribute name, run `.venv/bin/python scripts/devset_eval.py --inspect <one positions xml>` (and the same for a match information xml). It prints the element and attribute **names** only, no values. Paste that into the issue.
+4. Fill the placeholders in `configs/devset.yaml` from the ball EDA of our match (issue #13): the missing share and the share of the missing frames in each gap-length bin.
+
+**Comparing versions**
+
+```
+.venv/bin/python scripts/devset_eval.py --config configs/baseline.yaml configs/exp/ball-interpolate.yaml
+```
+
+The first config is the reference. The report gives spellF1 and macroF1 per match, the mean, and the paired difference of every other config against the first. Every config sees the same cut ball (fixed seed), so the difference is not luck. `--clean-ball` skips the cutting and shows what the gaps cost; `--matches J03WPY J03WMX` runs a few matches for a quick check. The first run parses the XML (a minute or so per match) and caches the arrays under `$IDSSE_DATA_DIR/cache/`; later runs are quick.
+
+**What the dev score means.** It compares versions. It does not predict the real score. The truth is the data provider's own possession flag (`BallPossession` while `BallStatus` is alive, otherwise dead ball), not the organisers' labels. The gaps are random, real gaps are not. Players come straight from tracking, with no tracklet swaps. Thresholds chosen here are still checked against these limits (D15).

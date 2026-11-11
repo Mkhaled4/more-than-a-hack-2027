@@ -9,6 +9,7 @@ Each stage is one module, so most PRs touch one file plus its tests.
 | Dead-ball score | `deadball.py` | `Match`, `BallTrack` | Score per frame |
 | Evidence and decoder | `possession.py` | `Match`, `BallTrack`, score | `H`/`A`/`D` per frame |
 | Final mask and write | `pipeline.py` | Labels | `outputs/Falafelona.csv` |
+| Dev set | `devset.py` | `$IDSSE_DATA_DIR` | `Match` plus truth, scores per config |
 
 `vendor.py` gives access to the official code, and `config.py` loads `configs/*.yaml`.
 
@@ -45,11 +46,22 @@ predict(match, ball, dead_score, cfg) -> labels: str[n] in {H, A, D}
 
 # pipeline.py
 run(cfg) -> writes outputs/Falafelona.csv, returns {sha256, counts}
+
+# devset.py
+load_idsse(match_id) -> DevMatch(match_id, match: Match, truth: str[n] in {H, A, D, X})
+degrade_ball(match, section, seed) -> (Match, report)   # ball gaps like ours, fixed seed
+run_devset(configs, dev_cfg, matches) -> spellF1 / macroF1 per config and match
 ```
 
 ## Baseline path
 
 `configs/baseline.yaml` reproduces the official `baseline_smooth50`: no ball cleaning, dead wherever the ball is unseen, then a centred majority vote. It is the check that the pipeline is correct before anything else is added.
+
+## Dev set
+
+We have no ground truth for our own match, so versions are compared on other matches (D15), starting with the seven IDSSE matches. `devset.py` turns an IDSSE match into the same `Match` the stages read (metres, 25 fps, 46 slots, pitch from the match information) and builds the truth from the file's own `BallStatus` and `BallPossession`. The ball of IDSSE is almost complete, ours is not, so `degrade_ball` cuts gaps into it with the gap lengths measured on our match (`configs/devset.yaml`, from the ball EDA, issue #13) and a fixed seed. The stages then run exactly as in `pipeline.run`, and the labels are scored with the official `possession_metrics`. The halves are placed one after the other with an ungraded pad between them, as the real halftime hole does, so a vote near a half edge never sees the other half.
+
+`scripts/devset_eval.py` is the entry point and `experiments/README.md` says how to run it. The dev score compares versions; it does not predict the real score (random gaps, the provider's possession flag as truth, no tracklet swaps).
 
 ## X and the second half
 
