@@ -1,0 +1,36 @@
+# Dev set from other matches (task N5, issue #23): which matches, and how the ball is degraded.
+# Read by scripts/devset_eval.py. Not a pipeline config: the pipeline configs are
+# configs/baseline.yaml and configs/exp/*.yaml, and are passed with --config.
+#
+# Data: IDSSE (Bassek et al., Scientific Data 12, 195, 2025), approved by the organisers in
+# official issue #16 (D15). Files live OUTSIDE the repo, in the folder IDSSE_DATA_DIR points at.
+seed: 0
+
+matches:                  # the seven full matches of the open IDSSE release
+  - J03WPY
+  - J03WMX
+  - J03WN1
+  - J03WOH
+  - J03WOY
+  - J03WPF
+  - J03WQF
+
+# The ball of IDSSE is almost complete, ours is not. These numbers make the dev ball look like
+# ours. They come from the ball EDA of OUR match (scripts/ball_eda.py, issue #13): copy them from
+# the pasted block. They describe our match only; they are not tuned on it (D9, D15).
+#
+# PLACEHOLDERS until the EDA numbers are filled in. Only the shape is known so far: the ball is
+# missing on about 41% of the graded frames, mostly in long gaps, with few short ones.
+degrade:
+  missing_share: 0.41     # EDA line "ball missing on N (xx.x%)": share of graded frames
+  gaps:                   # EDA gap bins: each bin's share of the MISSING frames (adds up to 1)
+    - {min_s: 0.0, max_s: 0.2,  share: 0.01}   # up to 0.2 s
+    - {min_s: 0.2, max_s: 0.5,  share: 0.02}   # 0.2-0.5 s
+    - {min_s: 0.5, max_s: 1.0,  share: 0.04}   # 0.5-1 s
+    - {min_s: 1.0, max_s: 2.0,  share: 0.08}   # 1-2 s
+    - {min_s: 2.0, max_s: 5.0,  share: 0.20}   # 2-5 s
+    - {min_s: 5.0, max_s: 60.0, share: 0.65}   # over 5 s (max_s: a little above the longest gap)
+  false_detections:       # wrong ball positions for the `reject` method; 0 = none
+    share: 0.0            # EDA "jump share" and "outside the pitch" show how many there are
+    min_s: 0.04           # shortest wrong stretch (s)
+    max_s: 0.2            # longest wrong stretch (s)
