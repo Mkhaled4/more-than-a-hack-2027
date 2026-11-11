@@ -1,0 +1,18 @@
+deadball:
+  method: combined
+  weights:
+    out_of_bounds: 1.0
+    before_kickoff: 1.0
+    players_still: 0.4
+    ball_missing: 0.3
+  out_margin: 1.0
+  still_speed: 1.0
+  still_seconds: 3
+
+possession:
+  method: hmm
+  team_cost: 1.0       # how much one nearest-player frame counts
+  dead_weight: 2.0     # how much the dead-ball score counts
+  switch_cost: 10.0    # H <-> A
+  to_dead_cost: 6.0    # live -> D
+  from_dead_cost: 6.0  # D -> live

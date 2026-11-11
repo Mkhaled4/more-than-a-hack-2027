@@ -137,19 +137,26 @@ class Possession:
         return np.array(LABELS)[out]
 
 
-def viterbi(costs: np.ndarray, switch_cost: float) -> np.ndarray:
+def viterbi(costs: np.ndarray, switch_cost) -> np.ndarray:
     """The cheapest state sequence: int[n] of state indices, given costs float[n, k].
 
-    Total cost = sum of costs[t, state_t] + switch_cost for every t where the state changes.
+    switch_cost: one number (every change costs the same) or a [k, k] table where
+    switch_cost[a, b] is the cost of going from state a to state b (diagonal = 0).
+    Total cost = sum of costs[t, state_t] + the switch cost of every change.
     Deterministic: on ties, staying beats switching and a lower state index beats a higher one.
     """
     costs = np.asarray(costs, dtype=np.float64)
     n, k = costs.shape
     if n == 0:
         return np.zeros(0, dtype=np.int64)
-    transition = np.full((k, k), float(switch_cost))
-    np.fill_diagonal(transition, 0.0)
-    # Visit "stay" first so argmin's first-index rule prefers staying on a tie.
+    if np.ndim(switch_cost) == 0:
+        transition = np.full((k, k), float(switch_cost))
+        np.fill_diagonal(transition, 0.0)
+    else:
+        transition = np.asarray(switch_cost, dtype=np.float64)
+        if transition.shape != (k, k):
+            raise ValueError(f"switch_cost table must be {k}x{k}, got {transition.shape}")
+
     order = np.array([[s, *[p for p in range(k) if p != s]] for s in range(k)])
 
     back = np.zeros((n, k), dtype=np.int8)
@@ -186,6 +193,38 @@ def decode_switch_cost(codes: np.ndarray, switch_cost: float, dead_margin: int) 
     return np.where(no_evidence_within(codes, dead_margin), "D", team).astype("<U1")
 
 
+STATES = ("H", "A", "D")
+H_STATE, A_STATE, D_STATE = 0, 1, 2
+def hmm_costs(codes: np.ndarray, dead_score: np.ndarray, team_cost: float,
+              dead_weight: float) -> np.ndarray:
+    """float[n, 3]: the cost of H, A and D on every frame. Low cost = this state fits.
+
+    Team evidence: the nearest player's team makes the OTHER team cost `team_cost`.
+    A frame with no ball (NOBODY) costs nothing for either team, so the owner holds.
+    Dead-ball evidence: dead_score p in 0..1. D costs dead_weight * (1 - p),
+    H and A each cost dead_weight * p. p = 0.5 is neutral.
+    """
+    n = len(codes)
+    costs = np.zeros((n, 3))
+    costs[codes == Possession.AWAY, H_STATE] = team_cost     # away nearest: evidence against H
+    costs[codes == Possession.HOME, A_STATE] = team_cost     # home nearest: evidence against A
+
+    p = np.clip(np.nan_to_num(np.asarray(dead_score, dtype=np.float64)), 0.0, 1.0)
+    costs[:, D_STATE] += dead_weight * (1.0 - p)              # alive-looking frames: D is costly
+    costs[:, H_STATE] += dead_weight * p                       # dead-looking frames: H and A
+    costs[:, A_STATE] += dead_weight * p                       #   are costly
+    return costs
+
+
+def switch_table(switch_cost: float, to_dead_cost: float, from_dead_cost: float) -> np.ndarray:
+    """[3, 3] switch costs between H, A and D (rows = from, columns = to)."""
+    return np.array([
+        [0.0, switch_cost, to_dead_cost],          # from H
+        [switch_cost, 0.0, to_dead_cost],          # from A
+        [from_dead_cost, from_dead_cost, 0.0],     # from D
+    ])
+
+
 def _number(section, key, *, whole=False):
     """A config value that must be a number >= 0 (and a whole number if `whole`)."""
     if key not in section:
@@ -205,10 +244,27 @@ def _team_codes(match, dead_score, section):
     return np.where(dead, Possession.NOBODY, codes).astype(np.int8)
 
 
+def _hmm(match, dead_score, section):
+    """3-state HMM: H, A and D decoded together with Viterbi."""
+    team_cost = _number(section, "team_cost")
+    dead_weight = _number(section, "dead_weight")
+    table = switch_table(_number(section, "switch_cost"),
+                         _number(section, "to_dead_cost"),
+                         _number(section, "from_dead_cost"))
+    codes, _ = Possession(match).nearest_player_labels()
+    costs = hmm_costs(codes, dead_score, team_cost, dead_weight)
+    return np.array(STATES)[viterbi(costs, table)]
+
 def _nearest_majority(match, dead_score, section):
     codes = _team_codes(match, dead_score, section)
     return Possession(match).smooth(codes, section["window"])
 
+def _decoder(match, dead_score, section):
+    codes, _ = Possession(match).nearest_player_labels()
+    dead = np.asarray(dead_score) >= section["dead_threshold"]
+    return Possession(match).decoder(
+        codes, dead_mask=dead, switch_frames=section.get("switch_frames", 15)
+    )
 
 def _switch_cost(match, dead_score, section):
     switch_cost = _number(section, "switch_cost")
@@ -221,27 +277,21 @@ def _switch_cost(match, dead_score, section):
 METHODS = {
     "nearest_majority": _nearest_majority,
     "switch_cost": _switch_cost,
+    "decoder": _decoder,
+    "hmm": _hmm,
 }
 
 def predict(match: Match, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
     """What pipeline.py calls (docs/architecture.md): H / A / D per frame.
 
     `match` is the cleaned Match from ball.py, so its ball_xy already holds the cleaned track.
-    `ball` (the BallTrack) is accepted for the interface but not used by nearest_majority.
-    Frames whose dead score is >= dead_threshold give no team vote, then the centred majority
-    vote of +/- window frames runs. Both numbers come from the `possession:` config section.
+    `dead_score` comes from deadball.detect. The `possession.method` key of the config picks
+    the method from METHODS; each method reads its own settings from the same section.
     """
     section = cfg["possession"]
     method = section["method"]
-
-    possession = Possession(match)
-    codes, _ = possession.nearest_player_labels()
-    dead = np.asarray(dead_score) >= section["dead_threshold"]
-    if method == "decoder":
-        return possession.decoder(
-            codes,
-            dead_mask=dead,
-            switch_frames=section.get("switch_frames", 15),
+    if method not in METHODS:
+        raise ValueError(
+            f"unknown possession method {method!r}; choose from {sorted(METHODS)}"
         )
-    codes = np.where(dead, Possession.NOBODY, codes).astype(np.int8)
-    return possession.smooth(codes, section["window"])
+    return METHODS[method](match, dead_score, section)
