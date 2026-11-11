@@ -551,14 +551,18 @@ def predict_labels(match, cfg, prepared=None):
 
     prepared: the output of prepare_stages for this match and config, to skip rerunning them.
     """
-    cleaned, track, dead_score = prepared or prepare_stages(match, cfg)
-    labels = possession.predict(cleaned, track, dead_score, cfg)
+    cleaned, _track, dead_score = prepared or prepare_stages(match, cfg)
+    # Same call as in pipeline.run: if possession.predict changes, change it in both places.
+    labels = possession.predict(cleaned, dead_score, cfg)
     return apply_x_policy(labels, cleaned, cfg)
 
 
 def _num(value):
-    """A plain float, with None (nothing to measure) as NaN so averages skip it."""
-    return float("nan") if value is None else float(value)
+    """A plain float, or None when there was nothing to measure (no matched switch).
+
+    None rather than NaN, so two identical runs compare equal (NaN != NaN).
+    """
+    return None if value is None else float(value)
 
 
 def score_labels(truth, labels, bootstrap_n=0):
@@ -572,7 +576,7 @@ def score_labels(truth, labels, bootstrap_n=0):
     tight = result["transitions"][TIGHT_TAU]
     loose = result["transitions"][LOOSE_TAU]
     per_class = result["per_class"]
-    return {
+    score = {
         # headline
         "spellF1": float(result["spell_f1_mean"]),
         "macroF1": float(result["macro_f1"]),
@@ -599,10 +603,11 @@ def score_labels(truth, labels, bootstrap_n=0):
         "latency_mean": _num(loose["mean_latency"]),
         "latency_median": _num(loose["median_latency"]),
         "latency_abs": _num(loose["mean_abs_latency"]),
-        # bootstrap interval for spellF1 (NaN unless bootstrap_n > 0)
-        "spell_ci_low": _num(result["spell_bootstrap_low"]),
-        "spell_ci_high": _num(result["spell_bootstrap_high"]),
     }
+    if bootstrap_n:                        # the spellF1 interval exists only when asked for
+        score["spell_ci_low"] = _num(result["spell_bootstrap_low"])
+        score["spell_ci_high"] = _num(result["spell_bootstrap_high"])
+    return score
 
 
 def _stage_key(cfg):
@@ -648,7 +653,12 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0):
 
 def _signed(value):
     """'+4.2' / '-3.0' / '--', so a lag reads as a lag at a glance."""
-    return "--" if not np.isfinite(value) else f"{value:+.1f}"
+    return "--" if value is None else f"{value:+.1f}"
+
+
+def _plain(value):
+    """'7.1' / '--' for a value that can be missing."""
+    return "--" if value is None else f"{value:.1f}"
 
 
 def _match_lines(s):
@@ -671,10 +681,10 @@ def _match_lines(s):
         f"{s['trans_f1_loose']:.3f} at +/-{LOOSE_TAU} frames, "
         f"latency mean {_signed(s['latency_mean'])} "
         f"/ median {_signed(s['latency_median'])} frames "
-        f"(mean |latency| {s['latency_abs']:.1f})"
+        f"(mean |latency| {_plain(s['latency_abs'])})"
     )
     lines = [headline, possessions, errors, switches]
-    if np.isfinite(s["spell_ci_low"]):
+    if s.get("spell_ci_low") is not None:
         lines.append(f"    spellF1 bootstrap 5-95%: {s['spell_ci_low']:.3f} to "
                      f"{s['spell_ci_high']:.3f}")
     return lines
