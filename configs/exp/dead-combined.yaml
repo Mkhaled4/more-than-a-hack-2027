@@ -1,0 +1,33 @@
+# Experiment: one dead-ball score from all the clues (task 3.7). Copy of baseline.yaml, only `deadball:` changed.
+# Each clue adds its weight where it fires; the total is capped at 1. The decoder calls a frame
+# dead from dead_threshold (0.5). All weights are guesses until tuned on other matches (D15).
+seed: 0
+
+ball:
+  method: none            # no gap filling, no rejection
+
+deadball:
+  method: combined
+  weights:
+    before_kickoff: 1.0   # certain: graded second-half frames before its kickoff are always dead
+    out_of_bounds: 1.0    # strongest clue: enough on its own
+    before_restart: 0.6   # enough on its own: before a tagged restart the ball is dead, even if players move
+    players_still: 0.4    # not enough alone: a visible ball in play means alive. Dead with ball_missing
+    ball_missing: 0.3     # weak: the ball also goes missing in live play. Needs another clue
+  out_margin: 1.0         # metres past the line before we call it out
+  still_speed: 1.0        # m/s, a bit slower than walking pace
+  still_seconds: 3        # how long the players must stay slow
+  restart_seconds:        # seconds of dead ball before each restart tag. Too long reaches into live play
+    throw-in: 8
+    corner kick: 15
+    goal kick: 20
+    free kick: 25
+    kick off (after goal): 45   # includes the celebration
+
+possession:
+  method: nearest_majority
+  window: 50              # centred majority vote over +/- 50 frames
+  dead_threshold: 0.5     # frames with dead score >= this give no team vote
+
+output:
+  x_policy: none          # D14 still proposed: no X written yet
