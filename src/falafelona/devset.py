@@ -653,20 +653,27 @@ def _signed(value):
 
 def _match_lines(s):
     """The full breakdown of one config on one match, as report lines."""
-    lines = [
-        f"    spellF1 {s['spellF1']:.3f}, macroF1 {s['macroF1']:.3f}",
+    headline = f"    spellF1 {s['spellF1']:.3f}, macroF1 {s['macroF1']:.3f}"
+    possessions = (
         f"    possessions: truth {s['truth_possessions']} / ours {s['our_possessions']} "
         f"({s['count_error']:+d}), precision {s['spell_precision']:.3f}, "
-        f"recall {s['spell_recall']:.3f} (IoU {HEADLINE_IOU}), missed {s['spell_missed']}, "
-        f"fake {s['spell_spurious']}, fragmentation {s['fragmentation']:.2f}, "
-        f"duration {s['duration_s']:.1f} s vs truth {s['truth_duration_s']:.1f} s",
+        f"recall {s['spell_recall']:.3f} (IoU {HEADLINE_IOU}), "
+        f"missed {s['spell_missed']}, fake {s['spell_spurious']}, "
+        f"fragmentation {s['fragmentation']:.2f}, "
+        f"duration {s['duration_s']:.1f} s vs truth {s['truth_duration_s']:.1f} s"
+    )
+    errors = (
         f"    errors: alive/dead F1 {s['alive_dead_f1']:.3f}, team acc {s['team_acc']:.3f}, "
-        f"F1 H/A/D {s['f1_H']:.3f}/{s['f1_A']:.3f}/{s['f1_D']:.3f}",
+        f"F1 H/A/D {s['f1_H']:.3f}/{s['f1_A']:.3f}/{s['f1_D']:.3f}"
+    )
+    switches = (
         f"    switches: F1 {s['trans_f1_tight']:.3f} at +/-{TIGHT_TAU}, "
         f"{s['trans_f1_loose']:.3f} at +/-{LOOSE_TAU} frames, "
-        f"latency mean {_signed(s['latency_mean'])} / median {_signed(s['latency_median'])} "
-        f"frames (mean |latency| {s['latency_abs']:.1f})",
-    ]
+        f"latency mean {_signed(s['latency_mean'])} "
+        f"/ median {_signed(s['latency_median'])} frames "
+        f"(mean |latency| {s['latency_abs']:.1f})"
+    )
+    lines = [headline, possessions, errors, switches]
     if np.isfinite(s["spell_ci_low"]):
         lines.append(f"    spellF1 bootstrap 5-95%: {s['spell_ci_low']:.3f} to "
                      f"{s['spell_ci_high']:.3f}")
