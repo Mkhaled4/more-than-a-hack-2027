@@ -136,6 +136,93 @@ class Possession:
 
         return np.array(LABELS)[out]
 
+
+def viterbi(costs: np.ndarray, switch_cost: float) -> np.ndarray:
+    """The cheapest state sequence: int[n] of state indices, given costs float[n, k].
+
+    Total cost = sum of costs[t, state_t] + switch_cost for every t where the state changes.
+    Deterministic: on ties, staying beats switching and a lower state index beats a higher one.
+    """
+    costs = np.asarray(costs, dtype=np.float64)
+    n, k = costs.shape
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    transition = np.full((k, k), float(switch_cost))
+    np.fill_diagonal(transition, 0.0)
+    # Visit "stay" first so argmin's first-index rule prefers staying on a tie.
+    order = np.array([[s, *[p for p in range(k) if p != s]] for s in range(k)])
+
+    back = np.zeros((n, k), dtype=np.int8)
+    total = costs[0].copy()
+    for t in range(1, n):
+        candidates = total[order] + transition[order, np.arange(k)[:, None]]  # [state, prev]
+        pick = np.argmin(candidates, axis=1)
+        back[t] = order[np.arange(k), pick]
+        total = candidates[np.arange(k), pick] + costs[t]
+
+    path = np.empty(n, dtype=np.int64)
+    path[-1] = int(np.argmin(total))
+    for t in range(n - 1, 0, -1):
+        path[t - 1] = back[t, path[t]]
+    return path
+
+
+def no_evidence_within(codes: np.ndarray, margin: int) -> np.ndarray:
+    """bool[n]: no frame within +/- margin has a team (HOME or AWAY). The baseline's D."""
+    has_team = codes != Possession.NOBODY
+    cumulative = np.concatenate(([0], np.cumsum(has_team)))
+    index = np.arange(len(codes))
+    low = np.maximum(0, index - margin)
+    high = np.minimum(len(codes), index + margin + 1)
+    return (cumulative[high] - cumulative[low]) == 0
+
+
+def decode_switch_cost(codes: np.ndarray, switch_cost: float, dead_margin: int) -> np.ndarray:
+    """H / A / D per frame from team evidence codes (HOME / AWAY / NOBODY)."""
+    costs = np.zeros((len(codes), 2))
+    costs[codes == Possession.AWAY, 0] = 1.0   # evidence against H
+    costs[codes == Possession.HOME, 1] = 1.0   # evidence against A
+    team = np.array(["H", "A"])[viterbi(costs, switch_cost)]
+    return np.where(no_evidence_within(codes, dead_margin), "D", team).astype("<U1")
+
+
+def _number(section, key, *, whole=False):
+    """A config value that must be a number >= 0 (and a whole number if `whole`)."""
+    if key not in section:
+        raise ValueError(f"possession method {section['method']!r} needs {key!r} in the config")
+    value = section[key]
+    ok = isinstance(value, int) if whole else isinstance(value, int | float)
+    if isinstance(value, bool) or not ok or not np.isfinite(value) or value < 0:
+        kind = "a whole number" if whole else "a number"
+        raise ValueError(f"possession.{key} must be {kind} >= 0, got {value!r}")
+    return value
+
+
+def _team_codes(match, dead_score, section):
+    """Nearest-player team per frame, NOBODY where the dead score is >= dead_threshold."""
+    codes, _ = Possession(match).nearest_player_labels()
+    dead = np.asarray(dead_score) >= section["dead_threshold"]
+    return np.where(dead, Possession.NOBODY, codes).astype(np.int8)
+
+
+def _nearest_majority(match, dead_score, section):
+    codes = _team_codes(match, dead_score, section)
+    return Possession(match).smooth(codes, section["window"])
+
+
+def _switch_cost(match, dead_score, section):
+    switch_cost = _number(section, "switch_cost")
+    dead_margin = _number(section, "dead_margin", whole=True)
+    _number(section, "dead_threshold")
+    return decode_switch_cost(_team_codes(match, dead_score, section), switch_cost, dead_margin)
+
+
+# method name in configs/*.yaml -> function(match, dead_score, cfg["possession"]) -> labels
+METHODS = {
+    "nearest_majority": _nearest_majority,
+    "switch_cost": _switch_cost,
+}
+
 def predict(match: Match, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
     """What pipeline.py calls (docs/architecture.md): H / A / D per frame.
 

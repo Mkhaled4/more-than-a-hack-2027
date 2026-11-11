@@ -13,11 +13,14 @@ WHAT IT DOES
    our real match (configs/devset.yaml, numbers from the ball EDA, issue #13), with a fixed seed,
    and optionally some false ball positions. IDSSE's own ball is almost complete, ours is not.
 4. Runs the pipeline stages (ball -> dead ball -> possession -> X policy) with any config and
-   scores the labels with the OFFICIAL metric (vendor possession_metrics: spellF1, macroF1).
+   scores the labels with the OFFICIAL metric (vendor possession_metrics: spellF1, macroF1, plus
+   the breakdown that explains them: possession precision/recall, alive/dead F1, team accuracy,
+   transition F1 and latency). Every match is reported on its own: nothing is averaged.
 
 Assumptions that differ from the competition match, so the dev score is a COMPARISON tool and
 not a prediction of the real score:
-- The truth is the data provider's own possession flag, not the organisers' hand labels.
+- The truth is the data provider's own possession flag (DFL), not the challenge provider's.
+  Both are mechanical from tracking, but their rules for "dead" and "owning" may differ a bit.
 - Gaps are placed at random. Real gaps are not random (they happen when the ball is hidden).
 - Players come straight from tracking: no tracklet swaps, no empty slots at random.
 
@@ -41,6 +44,7 @@ human can check these names against the real files in one minute.
 """
 
 import hashlib
+import json
 import os
 import xml.etree.ElementTree as ET
 import zlib
@@ -67,6 +71,11 @@ LOADER_VERSION = 1
 
 ALIVE, DEAD = 1, 0
 POSSESSION_HOME, POSSESSION_AWAY = 1, 2
+
+TIGHT_TAU, LOOSE_TAU = min(pm.TAUS), max(pm.TAUS)   # transition tolerances: 12 and 25 frames
+HEADLINE_IOU = pm.SPELL_IOU_HEADLINE                # possession precision/recall at IoU 0.5
+# Besides spellF1, these get a per-match difference in the report: they say WHY spellF1 moved.
+PAIRED_EXTRA = ("spell_precision", "spell_recall", "alive_dead_f1", "team_acc", "trans_f1_tight")
 
 
 @dataclass
@@ -529,30 +538,88 @@ def match_seed(base_seed, match_id):
 # --- running the pipeline and scoring ----------------------------------------------------------
 
 
-def predict_labels(match, cfg):
-    """The pipeline stages on one Match: the same calls as pipeline.run, without the file."""
+def prepare_stages(match, cfg):
+    """The stages before possession: cleaned ball and dead score. Shared between configs."""
     cleaner = DataCleaner(match, cfg)
     cleaned = cleaner.return_cleaned_data()
     dead_score = deadball.detect(cleaned, cleaner.track, cfg)
-    labels = possession.predict(cleaned, cleaner.track, dead_score, cfg)
+    return cleaned, cleaner.track, dead_score
+
+
+def predict_labels(match, cfg, prepared=None):
+    """The pipeline stages on one Match: the same calls as pipeline.run, without the file.
+
+    prepared: the output of prepare_stages for this match and config, to skip rerunning them.
+    """
+    cleaned, track, dead_score = prepared or prepare_stages(match, cfg)
+    labels = possession.predict(cleaned, track, dead_score, cfg)
     return apply_x_policy(labels, cleaned, cfg)
 
 
-def score_labels(truth, labels):
-    """The official metric on one match. Plain numbers only."""
-    result = pm.evaluate(pm.label_codes(truth), pm.label_codes(labels))
+def _num(value):
+    """A plain float, with None (nothing to measure) as NaN so averages skip it."""
+    return float("nan") if value is None else float(value)
+
+
+def score_labels(truth, labels, bootstrap_n=0):
+    """The official metric on one match. Plain numbers only: no frame numbers leave here.
+
+    Never copy the transitions' pairs / missed / spurious lists out of the result: they hold
+    frame numbers, which the aggregates-only rule does not allow.
+    """
+    result = pm.evaluate(pm.label_codes(truth), pm.label_codes(labels), bootstrap_n=bootstrap_n)
+    spell = result["spell_f1"][HEADLINE_IOU]
+    tight = result["transitions"][TIGHT_TAU]
+    loose = result["transitions"][LOOSE_TAU]
+    per_class = result["per_class"]
     return {
+        # headline
         "spellF1": float(result["spell_f1_mean"]),
         "macroF1": float(result["macro_f1"]),
+        # possessions
         "truth_possessions": int(result["n_gt_spells"]),
         "our_possessions": int(result["n_pred_spells"]),
+        "count_error": int(result["spell_count_error"]),
+        "spell_precision": float(spell["precision"]),
+        "spell_recall": float(spell["recall"]),
+        "spell_missed": int(spell["n_missed"]),
+        "spell_spurious": int(spell["n_spurious"]),
+        "duration_s": float(result["mean_spell_duration_s"]),
+        "truth_duration_s": float(result["gt_mean_spell_duration_s"]),
+        "fragmentation": float(result["fragmentation"]),
+        # where the errors come from
+        "alive_dead_f1": float(result["alive_dead_f1"]),
+        "team_acc": float(result["team_acc_both_alive"]),
+        "f1_H": float(per_class["H"]["f1"]),
+        "f1_A": float(per_class["A"]["f1"]),
+        "f1_D": float(per_class["D"]["f1"]),
+        # switch timing (latency > 0 means our switches come late)
+        "trans_f1_tight": float(tight["f1"]),
+        "trans_f1_loose": float(loose["f1"]),
+        "latency_mean": _num(loose["mean_latency"]),
+        "latency_median": _num(loose["median_latency"]),
+        "latency_abs": _num(loose["mean_abs_latency"]),
+        # bootstrap interval for spellF1 (NaN unless bootstrap_n > 0)
+        "spell_ci_low": _num(result["spell_bootstrap_low"]),
+        "spell_ci_high": _num(result["spell_bootstrap_high"]),
     }
 
 
-def run_devset(configs, dev_cfg, matches, degrade=True):
+def _stage_key(cfg):
+    """The config without its possession section, as one string.
+
+    Configs with the same key get the same cleaned ball and dead score, so those stages run
+    once per match. Assumes DataCleaner and deadball.detect do not read cfg["possession"].
+    """
+    rest = {key: value for key, value in cfg.items() if key != "possession"}
+    return json.dumps(rest, sort_keys=True, default=str)
+
+
+def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0):
     """Score every config on every match. The degraded ball is the same for every config.
 
     configs: {name: loaded pipeline config}. matches: list of DevMatch.
+    bootstrap_n: spellF1 bootstrap draws per match (0 = off, it is slow).
     Returns {"matches": {id: {"ball_missing": share, **report}}, "scores": {name: {id: score}}}.
     """
     out = {"matches": {}, "scores": {name: {} for name in configs}}
@@ -566,39 +633,51 @@ def run_devset(configs, dev_cfg, matches, degrade=True):
             graded = match.period > 0
             report = {"missing_share": float(np.isnan(match.ball_xy[graded, 0]).mean())}
         out["matches"][dev.match_id] = report
+        prepared = {}                      # stage key -> stages, for this match only
         for name, cfg in configs.items():
-            labels = predict_labels(match, cfg)
-            out["scores"][name][dev.match_id] = score_labels(dev.truth, labels)
+            key = _stage_key(cfg)
+            if key not in prepared:
+                prepared[key] = prepare_stages(match, cfg)
+            labels = predict_labels(match, cfg, prepared[key])
+            out["scores"][name][dev.match_id] = score_labels(dev.truth, labels, bootstrap_n)
     return out
 
 
 # --- the report --------------------------------------------------------------------------------
 
 
-def _mean(values):
-    return float(np.mean(values)) if len(values) else float("nan")
+def _signed(value):
+    """'+4.2' / '-3.0' / '--', so a lag reads as a lag at a glance."""
+    return "--" if not np.isfinite(value) else f"{value:+.1f}"
 
 
-def summarise(scores):
-    """Mean and range over matches of one config."""
-    spell = [s["spellF1"] for s in scores.values()]
-    macro = [s["macroF1"] for s in scores.values()]
-    return {
-        "spellF1": _mean(spell),
-        "spellF1_min": min(spell),
-        "spellF1_max": max(spell),
-        "macroF1": _mean(macro),
-    }
-
-
-def paired_difference(scores, base_scores):
-    """Mean spellF1 difference over the matches, one pair per match, and the matches it won."""
-    diffs = [scores[m]["spellF1"] - base_scores[m]["spellF1"] for m in scores]
-    return _mean(diffs), int(sum(d > 0 for d in diffs)), len(diffs)
+def _match_lines(s):
+    """The full breakdown of one config on one match, as report lines."""
+    lines = [
+        f"    spellF1 {s['spellF1']:.3f}, macroF1 {s['macroF1']:.3f}",
+        f"    possessions: truth {s['truth_possessions']} / ours {s['our_possessions']} "
+        f"({s['count_error']:+d}), precision {s['spell_precision']:.3f}, "
+        f"recall {s['spell_recall']:.3f} (IoU {HEADLINE_IOU}), missed {s['spell_missed']}, "
+        f"fake {s['spell_spurious']}, fragmentation {s['fragmentation']:.2f}, "
+        f"duration {s['duration_s']:.1f} s vs truth {s['truth_duration_s']:.1f} s",
+        f"    errors: alive/dead F1 {s['alive_dead_f1']:.3f}, team acc {s['team_acc']:.3f}, "
+        f"F1 H/A/D {s['f1_H']:.3f}/{s['f1_A']:.3f}/{s['f1_D']:.3f}",
+        f"    switches: F1 {s['trans_f1_tight']:.3f} at +/-{TIGHT_TAU}, "
+        f"{s['trans_f1_loose']:.3f} at +/-{LOOSE_TAU} frames, "
+        f"latency mean {_signed(s['latency_mean'])} / median {_signed(s['latency_median'])} "
+        f"frames (mean |latency| {s['latency_abs']:.1f})",
+    ]
+    if np.isfinite(s["spell_ci_low"]):
+        lines.append(f"    spellF1 bootstrap 5-95%: {s['spell_ci_low']:.3f} to "
+                     f"{s['spell_ci_high']:.3f}")
+    return lines
 
 
 def format_report(result, degrade=True):
-    """Totals only, one block per config. This is what gets pasted into the issue."""
+    """One block per config, one entry per match: no averaging over matches.
+
+    This is what gets pasted into the issue.
+    """
     names = list(result["scores"])
     lines = [f"Dev set (IDSSE), {len(result['matches'])} matches, aggregates only"]
     lines.append(
@@ -618,30 +697,30 @@ def format_report(result, degrade=True):
         lines.append(f"  {match_id}: ball missing {shown}{extra}")
 
     for name in names:
-        scores = result["scores"][name]
-        total = summarise(scores)
         lines.append(f"config {name}")
-        for match_id, s in scores.items():
-            lines.append(
-                f"  {match_id}: spellF1 {s['spellF1']:.3f}, macroF1 {s['macroF1']:.3f}, "
-                f"possessions truth {s['truth_possessions']} / ours {s['our_possessions']}"
-            )
-        lines.append(
-            f"  mean: spellF1 {total['spellF1']:.3f} "
-            f"(matches {total['spellF1_min']:.3f} to {total['spellF1_max']:.3f}), "
-            f"macroF1 {total['macroF1']:.3f}"
-        )
+        for match_id, s in result["scores"][name].items():
+            lines.append(f"  {match_id}")
+            lines.extend(_match_lines(s))
+
     if len(names) > 1:
-        lines.append(f"paired spellF1 difference against {names[0]} "
-                     f"(differences under {pm.SPELL_NOISE_BAND} are noise):")
+        base_name = names[0]
+        base = result["scores"][base_name]
+        lines.append(f"difference against {base_name}, per match "
+                     f"(spellF1 differences under {pm.SPELL_NOISE_BAND} are noise):")
         for name in names[1:]:
-            base = result["scores"][names[0]]
-            diff, wins, count = paired_difference(result["scores"][name], base)
-            if abs(diff) < pm.SPELL_NOISE_BAND:
-                verdict = "noise"
-            else:
-                verdict = "better" if diff > 0 else "worse"
-            lines.append(f"  {name}: {diff:+.3f}, better on {wins} of {count} matches ({verdict})")
+            scores = result["scores"][name]
+            wins = sum(scores[m]["spellF1"] > base[m]["spellF1"] for m in scores)
+            lines.append(f"  {name}: spellF1 better on {wins} of {len(scores)} matches")
+            for match_id, s in scores.items():
+                b = base[match_id]
+                diff = s["spellF1"] - b["spellF1"]
+                if abs(diff) < pm.SPELL_NOISE_BAND:
+                    verdict = "noise"
+                else:
+                    verdict = "better" if diff > 0 else "worse"
+                extra = ", ".join(f"{metric} {s[metric] - b[metric]:+.3f}"
+                                  for metric in PAIRED_EXTRA)
+                lines.append(f"    {match_id}: spellF1 {diff:+.3f} ({verdict}), {extra}")
     return "\n".join(lines)
 
 
