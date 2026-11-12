@@ -1,0 +1,29 @@
+seed: 0
+
+ball:
+  method: none            # no gap filling, no rejection
+
+deadball:
+  method: combined
+  weights:
+    out_of_bounds: 1.0
+    before_kickoff: 1.0
+    players_still: 0.4
+    ball_missing: 0.3
+  out_margin: 1.0
+  still_speed: 1.0
+  still_seconds: 3
+
+possession:
+  method: hmm
+  team_evidence: margin
+  team_cost: 3.0       # weight of the margin evidence
+  margin_scale: 1.0    # metres: a 3 m margin is ~95% sure
+  near_distance: 5.0   # metres: nearest player this far away = no evidence
+  dead_weight: 2.0
+  switch_cost: 10.0
+  to_dead_cost: 6.0
+  from_dead_cost: 6.0
+  
+output:
+  x_policy: none          # D14 still proposed: no X written yet

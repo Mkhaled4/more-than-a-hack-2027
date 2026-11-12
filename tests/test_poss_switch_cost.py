@@ -117,3 +117,33 @@ def test_runs_through_the_pipeline(bundle, tmp_path):
     assert result["rows"] == bundle["n_frames"]
     assert set(result["counts"]) >= {"H", "A", "D"}
 
+from types import SimpleNamespace
+
+
+def test_the_margin_evidence_is_really_used():
+    # Home player at 0.5 m on every frame, away player at 1.5 m: nearest says home always,
+    # but the margin is only 1 m, a much weaker case than "nearest = home" with cost 1.
+    n = 50
+    players = np.zeros((n, 2, 2))
+    players[:, 0] = [0.5, 0.0]
+    players[:, 1] = [1.5, 0.0]
+    match = SimpleNamespace(players_xy=players, ball_xy=np.zeros((n, 2)),
+                            slot_team=np.array(["H", "A"]))
+    base = {"method": "hmm", "team_cost": 1.0, "dead_weight": 0.0, "switch_cost": 10.0,
+            "to_dead_cost": 6.0, "from_dead_cost": 6.0,
+            "margin_scale": 1.0, "near_distance": 5.0}
+
+    seen = {}
+    real = possession.add_dead_costs
+
+    def spy(team, dead_score, dead_weight):
+        seen[len(seen)] = team.copy()
+        return real(team, dead_score, dead_weight)
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(possession, "add_dead_costs", spy)
+        possession._hmm(match, np.zeros(n), {**base, "team_evidence": "nearest"})
+        possession._hmm(match, np.zeros(n), {**base, "team_evidence": "margin"})
+
+    assert not np.allclose(seen[0], seen[1])    # the two kinds of evidence give different costs

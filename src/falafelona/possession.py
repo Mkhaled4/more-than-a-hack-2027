@@ -195,26 +195,68 @@ def decode_switch_cost(codes: np.ndarray, switch_cost: float, dead_margin: int) 
 
 STATES = ("H", "A", "D")
 H_STATE, A_STATE, D_STATE = 0, 1, 2
-def hmm_costs(codes: np.ndarray, dead_score: np.ndarray, team_cost: float,
-              dead_weight: float) -> np.ndarray:
-    """float[n, 3]: the cost of H, A and D on every frame. Low cost = this state fits.
-
-    Team evidence: the nearest player's team makes the OTHER team cost `team_cost`.
-    A frame with no ball (NOBODY) costs nothing for either team, so the owner holds.
-    Dead-ball evidence: dead_score p in 0..1. D costs dead_weight * (1 - p),
-    H and A each cost dead_weight * p. p = 0.5 is neutral.
-    """
-    n = len(codes)
-    costs = np.zeros((n, 3))
+def nearest_team_costs(codes: np.ndarray, team_cost: float) -> np.ndarray:
+    """float[n, 2]: cost of H and A from the nearest player's team (the old 0/1 evidence)."""
+    costs = np.zeros((len(codes), 2))
     costs[codes == Possession.AWAY, H_STATE] = team_cost     # away nearest: evidence against H
     costs[codes == Possession.HOME, A_STATE] = team_cost     # home nearest: evidence against A
-
-    p = np.clip(np.nan_to_num(np.asarray(dead_score, dtype=np.float64)), 0.0, 1.0)
-    costs[:, D_STATE] += dead_weight * (1.0 - p)              # alive-looking frames: D is costly
-    costs[:, H_STATE] += dead_weight * p                       # dead-looking frames: H and A
-    costs[:, A_STATE] += dead_weight * p                       #   are costly
     return costs
 
+
+def team_distances(players_xy: np.ndarray, ball_xy: np.ndarray,
+                   slot_team: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Distance (m) from the ball to the nearest home and the nearest away player per frame.
+
+    inf where that team has no tracked player or the ball is missing.
+    """
+    diff = players_xy - ball_xy[:, None, :]                   # (frames, slots, 2)
+    dist = np.sqrt(np.sum(diff * diff, axis=2))               # NaN if player or ball missing
+    dist = np.where(np.isnan(dist), np.inf, dist)
+    slot = np.asarray(slot_team)
+    return dist[:, slot == "H"].min(axis=1), dist[:, slot == "A"].min(axis=1)
+
+
+def margin_team_costs(d_home: np.ndarray, d_away: np.ndarray, team_cost: float,
+                      margin_scale: float, near_distance: float) -> np.ndarray:
+    """float[n, 2]: cost of H and A from how much closer one team is to the ball.
+
+    p_home = sigmoid((d_away - d_home) / margin_scale): 0.5 when both are equally close.
+    The evidence fades to 0 as the nearest player gets near_distance away (a loose ball or a
+    ball in the air), and is 0 when the ball is missing, so the current owner holds.
+    """
+    seen = np.isfinite(d_home) | np.isfinite(d_away)
+    far = 1e3                                                 # a team with nobody tracked
+    home = np.where(np.isfinite(d_home), d_home, far)
+    away = np.where(np.isfinite(d_away), d_away, far)
+
+    margin = np.clip(away - home, -30.0, 30.0)
+    p_home = np.clip(1.0 / (1.0 + np.exp(-margin / margin_scale)), 1e-6, 1 - 1e-6)
+    closeness = np.clip(1.0 - np.minimum(home, away) / near_distance, 0.0, 1.0)
+    weight = np.where(seen, team_cost * closeness, 0.0)
+
+    costs = np.zeros((len(d_home), 2))
+    costs[:, H_STATE] = weight * -np.log(p_home)
+    costs[:, A_STATE] = weight * -np.log(1.0 - p_home)
+    return costs
+
+
+def add_dead_costs(team_costs: np.ndarray, dead_score: np.ndarray,
+                   dead_weight: float) -> np.ndarray:
+    """float[n, 3]: the H and A costs plus the D column from dead_score p in 0..1.
+
+    D costs dead_weight * (1 - p); H and A each get dead_weight * p on top.
+    """
+    p = np.clip(np.nan_to_num(np.asarray(dead_score, dtype=np.float64)), 0.0, 1.0)
+    costs = np.zeros((len(team_costs), 3))
+    costs[:, :2] = team_costs + dead_weight * p[:, None]
+    costs[:, D_STATE] = dead_weight * (1.0 - p)
+    return costs
+
+
+def hmm_costs(codes: np.ndarray, dead_score: np.ndarray, team_cost: float,
+              dead_weight: float) -> np.ndarray:
+    """float[n, 3] with the nearest-player evidence (team_evidence: nearest)."""
+    return add_dead_costs(nearest_team_costs(codes, team_cost), dead_score, dead_weight)
 
 def switch_table(switch_cost: float, to_dead_cost: float, from_dead_cost: float) -> np.ndarray:
     """[3, 3] switch costs between H, A and D (rows = from, columns = to)."""
@@ -244,15 +286,34 @@ def _team_codes(match, dead_score, section):
     return np.where(dead, Possession.NOBODY, codes).astype(np.int8)
 
 
+TEAM_EVIDENCE = ("nearest", "margin")
+
+
 def _hmm(match, dead_score, section):
-    """3-state HMM: H, A and D decoded together with Viterbi."""
+    """3-state HMM: H, A and D decoded together with Viterbi.
+
+    team_evidence: "nearest" (0/1 nearest player, the default) or "margin" (distance margin).
+    """
+    evidence = section.get("team_evidence", "nearest")
+    if evidence not in TEAM_EVIDENCE:
+        raise ValueError(f"possession.team_evidence must be one of {TEAM_EVIDENCE}, "
+                         f"got {evidence!r}")
     team_cost = _number(section, "team_cost")
     dead_weight = _number(section, "dead_weight")
     table = switch_table(_number(section, "switch_cost"),
                          _number(section, "to_dead_cost"),
                          _number(section, "from_dead_cost"))
-    codes, _ = Possession(match).nearest_player_labels()
-    costs = hmm_costs(codes, dead_score, team_cost, dead_weight)
+
+    if evidence == "nearest":
+        codes, _ = Possession(match).nearest_player_labels()
+        team = nearest_team_costs(codes, team_cost)
+    else:
+        d_home, d_away = team_distances(match.players_xy, match.ball_xy, match.slot_team)
+        team = margin_team_costs(d_home, d_away, team_cost,
+                                 _number(section, "margin_scale"),
+                                 _number(section, "near_distance"))
+
+    costs = add_dead_costs(team, dead_score, dead_weight)
     return np.array(STATES)[viterbi(costs, table)]
 
 def _nearest_majority(match, dead_score, section):
@@ -290,7 +351,7 @@ def predict(match: Match, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
     """
     section = cfg["possession"]
     method = section["method"]
-    if method not in METHODS and method not in METHODS:
+    if method not in METHODS:
         available = ", ".join(sorted(METHODS))
         raise ValueError(f"unknown possession method {method!r}; available: {available}")
     return METHODS[method](match, dead_score, section)
