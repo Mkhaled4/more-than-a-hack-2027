@@ -13,7 +13,8 @@
 # Other options:
 #   --clean-ball   do not degrade the ball (an upper bound: what the gaps cost us)
 #   --matches J03WPY J03WMX   only these matches (a quick run)
-#   --bootstrap N  spellF1 confidence intervals (slow; use for the final choice between configs)
+#   --bootstrap N  a 5-95% interval for spellF1 only, computed per match with N draws (0 = off).
+#                  Slow: matches x configs x N draws. Use it for the final choice between configs.
 #   --summary      only shapes and label counts per match (checks that the files load)
 #   --inspect FILE print the element and attribute NAMES of one IDSSE XML file (no values)
 # Prints aggregates only: no frame numbers, no positions, and it writes no files except the
@@ -48,9 +49,16 @@ def main(argv=None):
     parser.add_argument("--clean-ball", action="store_true", help="do not degrade the ball")
     parser.add_argument("--summary", action="store_true", help="only shapes and counts")
     parser.add_argument("--inspect", default=None, help="print the XML structure of one file")
-    parser.add_argument("--bootstrap", type=int, default=0,
-                        help="bootstrap draws for spellF1 intervals (slow; 1000 for a final check)")
+    parser.add_argument(
+        "--bootstrap",
+        type=int,
+        default=0,
+        help="draws for a 5-95%% spellF1 interval, per match (0 = off; slow: matches x configs x "
+        "draws, so use e.g. 1000 only for the final choice between configs)",
+    )
     args = parser.parse_args(argv)
+    if args.bootstrap < 0:
+        parser.error("--bootstrap must be 0 or more")
 
     if args.inspect:
         print(devset.inspect_structure(args.inspect))
@@ -72,8 +80,9 @@ def main(argv=None):
     if len(configs) != len(args.config):
         parser.error("two configs have the same file name")
     degrade = not args.clean_ball
-    result = devset.run_devset(configs, dev_cfg, matches, degrade=degrade,
-                               bootstrap_n=args.bootstrap)
+    result = devset.run_devset(
+        configs, dev_cfg, matches, degrade=degrade, bootstrap_n=args.bootstrap
+    )
     print(devset.format_report(result, degrade=degrade))
     return 0
 
