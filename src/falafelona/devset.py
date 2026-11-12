@@ -552,7 +552,7 @@ def predict_labels(match, cfg, prepared=None):
 
     prepared: the output of prepare_stages for this match and config, to skip rerunning them.
     """
-    cleaned, track, dead_score = prepared or prepare_stages(match, cfg)
+    cleaned, dead_score = prepared or prepare_stages(match, cfg)
     labels = possession.predict(cleaned,  dead_score, cfg)
     return apply_x_policy(labels, cleaned, cfg)
 
