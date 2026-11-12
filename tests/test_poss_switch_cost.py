@@ -96,8 +96,8 @@ def test_switch_cost_flickers_less_than_the_vote():
 def test_predict_dispatch_and_config():
     cfg = load_config("configs/exp/poss-switch-cost.yaml")
     assert cfg["possession"]["method"] in possession.METHODS
-    with pytest.raises(ValueError, match="available: nearest_majority, switch_cost"):
-        possession.predict(None, None, np.zeros(3), {"possession": {"method": "nope"}})
+    with pytest.raises(ValueError, match="unknown possession method 'nope'"):
+        possession.predict(None, np.zeros(3), {"possession": {"method": "nope"}})
 
 
 @pytest.mark.parametrize("key,value", [
