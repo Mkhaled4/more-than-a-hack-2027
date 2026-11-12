@@ -1,3 +1,8 @@
+seed: 0
+
+ball:
+  method: none            # no gap filling, no rejection
+
 deadball:
   method: combined
   weights:
@@ -16,3 +21,6 @@ possession:
   switch_cost: 10.0    # H <-> A
   to_dead_cost: 6.0    # live -> D
   from_dead_cost: 6.0  # D -> live
+
+output:
+  x_policy: none          # D14 still proposed: no X written yet

@@ -291,7 +291,7 @@ def predict(match: Match, dead_score: np.ndarray, cfg: dict) -> np.ndarray:
     section = cfg["possession"]
     method = section["method"]
     if method not in METHODS:
-        raise ValueError(
-            f"unknown possession method {method!r}; choose from {sorted(METHODS)}"
-        )
+        if method not in METHODS:
+            available = ", ".join(sorted(METHODS))
+            raise ValueError(f"unknown possession method {method!r}; available: {available}")
     return METHODS[method](match, dead_score, section)
