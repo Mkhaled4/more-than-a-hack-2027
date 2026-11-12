@@ -15,7 +15,8 @@ WHAT IT DOES
 4. Runs the pipeline stages (ball -> dead ball -> possession -> X policy) with any config and
    scores the labels with the OFFICIAL metric (vendor possession_metrics: spellF1, macroF1, plus
    the breakdown that explains them: possession precision/recall, alive/dead F1, team accuracy,
-   transition F1 and latency). Every match is reported on its own: nothing is averaged.
+   transition F1 and latency). The report gives the mean over matches first (the one "Dev
+   spellF1" per run that RESULTS.md asks for, D15), then every match on its own.
 
 Assumptions that differ from the competition match, so the dev score is a COMPARISON tool and
 not a prediction of the real score:
@@ -74,7 +75,7 @@ POSSESSION_HOME, POSSESSION_AWAY = 1, 2
 
 TIGHT_TAU, LOOSE_TAU = min(pm.TAUS), max(pm.TAUS)   # transition tolerances: 12 and 25 frames
 HEADLINE_IOU = pm.SPELL_IOU_HEADLINE                # possession precision/recall at IoU 0.5
-# Besides spellF1, these get a per-match difference in the report: they say WHY spellF1 moved.
+# Besides spellF1, these get a paired difference in the report: they say WHY spellF1 moved.
 PAIRED_EXTRA = ("spell_precision", "spell_recall", "alive_dead_f1", "team_acc", "trans_f1_tight")
 
 
@@ -551,9 +552,8 @@ def predict_labels(match, cfg, prepared=None):
 
     prepared: the output of prepare_stages for this match and config, to skip rerunning them.
     """
-    cleaned, _track, dead_score = prepared or prepare_stages(match, cfg)
-    # Same call as in pipeline.run: if possession.predict changes, change it in both places.
-    labels = possession.predict(cleaned, dead_score, cfg)
+    cleaned, dead_score = prepared or prepare_stages(match, cfg)
+    labels = possession.predict(cleaned,  dead_score, cfg)
     return apply_x_policy(labels, cleaned, cfg)
 
 
@@ -604,7 +604,7 @@ def score_labels(truth, labels, bootstrap_n=0):
         "latency_median": _num(loose["median_latency"]),
         "latency_abs": _num(loose["mean_abs_latency"]),
     }
-    if bootstrap_n:                        # the spellF1 interval exists only when asked for
+    if bootstrap_n:  # the spellF1 interval exists only when asked for
         score["spell_ci_low"] = _num(result["spell_bootstrap_low"])
         score["spell_ci_high"] = _num(result["spell_bootstrap_high"])
     return score
@@ -638,7 +638,7 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0):
             graded = match.period > 0
             report = {"missing_share": float(np.isnan(match.ball_xy[graded, 0]).mean())}
         out["matches"][dev.match_id] = report
-        prepared = {}                      # stage key -> stages, for this match only
+        prepared = {}  # stage key -> stages, for this match only
         for name, cfg in configs.items():
             key = _stage_key(cfg)
             if key not in prepared:
@@ -651,9 +651,56 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0):
 # --- the report --------------------------------------------------------------------------------
 
 
+def _mean(values):
+    """Mean of the values that exist (None = nothing measured), or None if there are none."""
+    present = [v for v in values if v is not None]
+    return float(np.mean(present)) if present else None
+
+
+def summarise(scores):
+    """Mean over matches of every metric of one config, plus the spellF1 range."""
+    keys = next(iter(scores.values())).keys()
+    total = {key: _mean([s.get(key) for s in scores.values()]) for key in keys}
+    spell = [s["spellF1"] for s in scores.values()]
+    total["spellF1_min"], total["spellF1_max"] = min(spell), max(spell)
+    return total
+
+
+def paired_difference(scores, base_scores, metric="spellF1"):
+    """Mean difference in `metric` over the matches, one pair per match, and the matches won.
+
+    Matches where either side has no value for the metric are left out.
+    """
+    diffs = [
+        scores[m][metric] - base_scores[m][metric]
+        for m in scores
+        if scores[m].get(metric) is not None and base_scores[m].get(metric) is not None
+    ]
+    return _mean(diffs), int(sum(d > 0 for d in diffs)), len(diffs)
+
+
+def _verdict(diff):
+    """'noise' inside the spellF1 noise band, else 'better' or 'worse'."""
+    if abs(diff) < pm.SPELL_NOISE_BAND:
+        return "noise"
+    return "better" if diff > 0 else "worse"
+
+
 def _signed(value):
     """'+4.2' / '-3.0' / '--', so a lag reads as a lag at a glance."""
     return "--" if value is None else f"{value:+.1f}"
+
+
+def _signed3(value):
+    """'+0.031' / '--' for a difference that can be missing."""
+    return "--" if value is None else f"{value:+.3f}"
+
+
+def _diff(score, base, metric):
+    """score[metric] - base[metric], or None if either is missing."""
+    if score.get(metric) is None or base.get(metric) is None:
+        return None
+    return score[metric] - base[metric]
 
 
 def _plain(value):
@@ -685,15 +732,19 @@ def _match_lines(s):
     )
     lines = [headline, possessions, errors, switches]
     if s.get("spell_ci_low") is not None:
-        lines.append(f"    spellF1 bootstrap 5-95%: {s['spell_ci_low']:.3f} to "
-                     f"{s['spell_ci_high']:.3f}")
+        lines.append(
+            f"    spellF1 bootstrap 5-95%: {s['spell_ci_low']:.3f} to {s['spell_ci_high']:.3f}"
+        )
     return lines
 
 
 def format_report(result, degrade=True):
-    """One block per config, one entry per match: no averaging over matches.
+    """One block per config: the mean over matches, then every match on its own.
 
-    This is what gets pasted into the issue.
+    With several configs, the paired difference against the first one follows: one overall
+    line (mean difference, matches won, verdict, and the mean change of the PAIRED_EXTRA
+    metrics, which say why spellF1 moved), then one line per match.
+    This is what gets pasted into the issue; the mean spellF1 is the "Dev spellF1" of RESULTS.md.
     """
     names = list(result["scores"])
     lines = [f"Dev set (IDSSE), {len(result['matches'])} matches, aggregates only"]
@@ -714,30 +765,43 @@ def format_report(result, degrade=True):
         lines.append(f"  {match_id}: ball missing {shown}{extra}")
 
     for name in names:
+        scores = result["scores"][name]
+        total = summarise(scores)
         lines.append(f"config {name}")
-        for match_id, s in result["scores"][name].items():
+        lines.append(
+            f"  mean: spellF1 {total['spellF1']:.3f} "
+            f"(matches {total['spellF1_min']:.3f} to {total['spellF1_max']:.3f}), "
+            f"macroF1 {total['macroF1']:.3f}"
+        )
+        for match_id, s in scores.items():
             lines.append(f"  {match_id}")
             lines.extend(_match_lines(s))
 
     if len(names) > 1:
         base_name = names[0]
         base = result["scores"][base_name]
-        lines.append(f"difference against {base_name}, per match "
-                     f"(spellF1 differences under {pm.SPELL_NOISE_BAND} are noise):")
+        lines.append(
+            f"paired spellF1 difference against {base_name} "
+            f"(differences under {pm.SPELL_NOISE_BAND} are noise):"
+        )
         for name in names[1:]:
             scores = result["scores"][name]
-            wins = sum(scores[m]["spellF1"] > base[m]["spellF1"] for m in scores)
-            lines.append(f"  {name}: spellF1 better on {wins} of {len(scores)} matches")
+            diff, wins, count = paired_difference(scores, base)
+            extra = ", ".join(
+                f"{metric} {_signed3(paired_difference(scores, base, metric)[0])}"
+                for metric in PAIRED_EXTRA
+            )
+            lines.append(
+                f"  {name}: {diff:+.3f}, better on {wins} of {count} matches "
+                f"({_verdict(diff)}); mean {extra}"
+            )
             for match_id, s in scores.items():
                 b = base[match_id]
-                diff = s["spellF1"] - b["spellF1"]
-                if abs(diff) < pm.SPELL_NOISE_BAND:
-                    verdict = "noise"
-                else:
-                    verdict = "better" if diff > 0 else "worse"
-                extra = ", ".join(f"{metric} {s[metric] - b[metric]:+.3f}"
-                                  for metric in PAIRED_EXTRA)
-                lines.append(f"    {match_id}: spellF1 {diff:+.3f} ({verdict}), {extra}")
+                one = s["spellF1"] - b["spellF1"]
+                per_metric = ", ".join(
+                    f"{metric} {_signed3(_diff(s, b, metric))}" for metric in PAIRED_EXTRA
+                )
+                lines.append(f"    {match_id}: spellF1 {one:+.3f} ({_verdict(one)}), {per_metric}")
     return "\n".join(lines)
 
 
