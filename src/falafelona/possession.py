@@ -14,6 +14,7 @@
 
 import numpy as np
 
+from falafelona import velocity
 from falafelona.io import Match
 
 # The four published baseline variants: (name, half-width of the vote window in frames).
@@ -193,6 +194,163 @@ def margin_team_costs(d_home: np.ndarray, d_away: np.ndarray, team_cost: float,
     return costs
 
 
+def fast_ball_frames(speed: np.ndarray, threshold: float) -> np.ndarray:
+    """bool[n]: frames where the ball moves faster than `threshold` m/s (a pass or a shot).
+
+    NaN speed (ball unknown, or too few positions for the fit) is not fast: there the
+    distance evidence is used as before.
+    """
+    speed = np.asarray(speed, dtype=np.float64)
+    return np.isfinite(speed) & (speed > threshold)
+
+
+def drop_fast_ball_evidence(team_costs: np.ndarray, fast: np.ndarray) -> np.ndarray:
+    """float[n, 2]: the H and A costs with no evidence (0) on fast-ball frames.
+
+    A player the ball flies past is often the nearest one without touching it, so on those
+    frames nobody gets evidence and the current owner holds until someone receives the ball.
+    """
+    costs = np.array(team_costs, dtype=np.float64)
+    costs[np.asarray(fast, dtype=bool)] = 0.0
+    return costs
+
+
+def _fast_ball(match, section):
+    """bool[n] fast-ball frames, or None when possession.fast_ball_speed is not set (off)."""
+    if "fast_ball_speed" not in section:
+        return None
+    threshold = section["fast_ball_speed"]
+    if (isinstance(threshold, bool) or not isinstance(threshold, int | float)
+            or not np.isfinite(threshold) or threshold <= 0):
+        raise ValueError(f"possession.fast_ball_speed must be a number > 0, got {threshold!r}")
+    if "velocity" not in section:
+        raise ValueError("possession.fast_ball_speed needs a possession.velocity block "
+                         "(half_window_s, min_points, min_each_side)")
+    _, speed = velocity.ball_velocity(match.ball_xy, match.period, match.fps,
+                                      section["velocity"])
+    return fast_ball_frames(speed, threshold)
+
+
+def nearest_slots(players_xy: np.ndarray, ball_xy: np.ndarray,
+                  slot_team: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """int[n] slot index of the nearest home and the nearest away player per frame.
+
+    -1 where that team has no tracked player or the ball is missing.
+    """
+    diff = players_xy - ball_xy[:, None, :]
+    dist = np.sqrt(np.sum(diff * diff, axis=2))
+    dist = np.where(np.isnan(dist), np.inf, dist)
+    slot = np.asarray(slot_team)
+    nearest = []
+    for team in ("H", "A"):
+        cols = np.flatnonzero(slot == team)
+        if cols.size == 0:
+            nearest.append(np.full(len(dist), -1))
+            continue
+        pick = np.argmin(dist[:, cols], axis=1)
+        found = np.isfinite(dist[np.arange(len(dist)), cols[pick]])
+        nearest.append(np.where(found, cols[pick], -1))
+    return nearest[0], nearest[1]
+
+
+def player_velocities(players_xy: np.ndarray, period: np.ndarray, fps: float,
+                      section: dict) -> np.ndarray:
+    """float[n, n_slots, 2] velocity of every slot in m/s, with the ball's line fit.
+
+    Same settings and same rules as velocity.ball_velocity (NaN where too few positions,
+    each half on its own), one slot at a time.
+    """
+    settings = velocity.velocity_settings(section, fps)
+    out = np.full(players_xy.shape, np.nan)
+    for half in (1, 2):
+        frames = np.flatnonzero(period == half)
+        if not frames.size:
+            continue
+        part = slice(frames[0], frames[-1] + 1)
+        for slot in range(players_xy.shape[1]):
+            track = players_xy[part, slot]
+            if np.isnan(track).all():
+                continue
+            out[part, slot] = velocity._slopes(track, **settings) * fps
+    return out
+
+
+def _slot_velocity(v_players: np.ndarray, slots: np.ndarray) -> np.ndarray:
+    """float[n, 2] velocity of the given slot on each frame, NaN where the slot is -1."""
+    rows = np.arange(len(slots))
+    v = v_players[rows, np.maximum(slots, 0)]
+    v[slots < 0] = np.nan
+    return v
+
+
+def velocity_match_costs(v_ball: np.ndarray, v_home: np.ndarray, v_away: np.ndarray,
+                         d_home: np.ndarray, d_away: np.ndarray, max_diff: float,
+                         control_distance: float, cost: float) -> np.ndarray:
+    """float[n, 2] extra H and A costs: a player who moves WITH the ball controls it.
+
+    A team "matches" on a frame when its nearest player is within control_distance of the
+    ball and the ball's velocity differs from his by less than max_diff m/s (dribbling, or
+    the ball at his feet). If only one team matches, the other team's state costs `cost`.
+    Both or neither matching, or any NaN velocity: no extra cost.
+    """
+    def matches(v_player, d):
+        gap = np.hypot(*(v_ball - v_player).T)
+        return np.isfinite(gap) & (gap < max_diff) & (np.asarray(d) < control_distance)
+
+    home, away = matches(v_home, d_home), matches(v_away, d_away)
+    costs = np.zeros((len(v_ball), 2))
+    costs[home & ~away, A_STATE] = cost      # home controls it: evidence against A
+    costs[away & ~home, H_STATE] = cost      # away controls it: evidence against H
+    return costs
+
+
+def _velocity_match(match, section):
+    """float[n, 2] velocity-match costs, or None when possession.velocity_match is not set."""
+    if "velocity_match" not in section:
+        return None
+    block = section["velocity_match"]
+    if not isinstance(block, dict):
+        raise TypeError("possession.velocity_match must be a mapping "
+                         "(max_diff, control_distance, cost)")
+    values = {}
+    for key in ("max_diff", "control_distance", "cost"):
+        value = block.get(key)
+        if (isinstance(value, bool) or not isinstance(value, int | float)
+                or not np.isfinite(value) or value <= 0):
+            raise ValueError(f"possession.velocity_match.{key} must be a number > 0, "
+                             f"got {value!r}")
+        values[key] = float(value)
+    if "velocity" not in section:
+        raise ValueError("possession.velocity_match needs a possession.velocity block "
+                         "(half_window_s, min_points, min_each_side)")
+
+    v_ball, _ = velocity.ball_velocity(match.ball_xy, match.period, match.fps,
+                                       section["velocity"])
+    v_players = player_velocities(match.players_xy, match.period, match.fps,
+                                  section["velocity"])
+    i_home, i_away = nearest_slots(match.players_xy, match.ball_xy, match.slot_team)
+    d_home, d_away = team_distances(match.players_xy, match.ball_xy, match.slot_team)
+    return velocity_match_costs(v_ball, _slot_velocity(v_players, i_home),
+                                _slot_velocity(v_players, i_away), d_home, d_away,
+                                values["max_diff"], values["control_distance"],
+                                values["cost"])
+
+
+def lag_team_costs(team_costs: np.ndarray, lag: int) -> np.ndarray:
+    """float[n, 2]: the H and A costs moved `lag` frames later (team[t] <- team[t - lag]).
+
+    The first `lag` frames get no evidence (0), so the current owner holds there. The receiver
+    gets closer before he touches the ball, so unshifted evidence switches too early.
+    """
+    team_costs = np.asarray(team_costs, dtype=np.float64)
+    if lag == 0:
+        return team_costs
+    shifted = np.zeros_like(team_costs)
+    if lag < len(team_costs):
+        shifted[lag:] = team_costs[:-lag]
+    return shifted
+
+
 def add_dead_costs(team_costs: np.ndarray, dead_score: np.ndarray,
                    dead_weight: float) -> np.ndarray:
     """float[n, 3]: the H and A costs plus the D column from dead_score p in 0..1.
@@ -247,6 +405,11 @@ def _hmm(match, dead_score, section):
     """3-state HMM: H, A and D decoded together with Viterbi.
 
     team_evidence: "nearest" (0/1 nearest player, the default) or "margin" (distance margin).
+    evidence_lag: frames to move the H / A evidence later (default 0). D is not moved.
+    fast_ball_speed: m/s; above it the H / A evidence is dropped (default: not set = off).
+        Needs a `velocity:` block for velocity.ball_velocity.
+    velocity_match: {max_diff, control_distance, cost}; extra evidence for the team whose
+        nearest player moves with the ball (default: not set = off). Needs `velocity:` too.
     """
     evidence = section.get("team_evidence", "nearest")
     if evidence not in TEAM_EVIDENCE:
@@ -267,7 +430,16 @@ def _hmm(match, dead_score, section):
                                  _number(section, "margin_scale"),
                                  _number(section, "near_distance"))
 
-    costs = add_dead_costs(team, dead_score, dead_weight)
+    extra = _velocity_match(match, section)
+    if extra is not None:
+        team = team + extra
+
+    fast = _fast_ball(match, section)
+    if fast is not None:
+        team = drop_fast_ball_evidence(team, fast)
+
+    lag = _number(section, "evidence_lag", whole=True) if "evidence_lag" in section else 0
+    costs = add_dead_costs(lag_team_costs(team, lag), dead_score, dead_weight)
     return np.array(STATES)[viterbi(costs, table)]
 
 
