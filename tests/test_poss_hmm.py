@@ -150,6 +150,64 @@ def test_a_ball_missing_for_a_few_frames_does_not_split_the_possession():
 def test_a_real_change_switches():
     assert decode([H] * 50 + [A] * 50) == "H" * 50 + "A" * 50
 
+# --- restart: the team nearest the ball as play restarts takes it ----------------------------
+
+RESTART = {"threshold": 0.5, "min_dead_s": 1.0, "look_s": 1.0, "boost_s": 1.0, "cost": 2.0}
+
+
+def test_restart_costs_favour_the_team_nearest_the_ball_as_the_spell_ends():
+    codes = np.array([H] * 20 + [N] * 50 + [A] * 30)
+    dead = np.array([0.0] * 20 + [1.0] * 50 + [0.0] * 30)
+    costs = possession.restart_team_costs(codes, dead, 0.5, 25, 10, 15, 2.0)
+
+    assert (costs[70:85, possession.H_STATE] == 2.0).all()   # away restarts: against H
+    assert (costs[70:85, possession.A_STATE] == 0.0).all()
+    assert (costs[:70] == 0).all() and (costs[85:] == 0).all()
+
+
+def test_a_short_dead_blip_is_not_a_restart():
+    codes = np.array([H] * 50 + [N] * 10 + [A] * 40)
+    dead = np.array([0.0] * 50 + [1.0] * 10 + [0.0] * 40)
+    assert (possession.restart_team_costs(codes, dead, 0.5, 25, 10, 15, 2.0) == 0).all()
+
+
+def test_a_tie_at_the_restart_gives_no_evidence():
+    codes = np.array([N] * 50 + [H, A] * 25)
+    dead = np.array([1.0] * 50 + [0.0] * 50)
+    assert (possession.restart_team_costs(codes, dead, 0.5, 25, 2, 15, 2.0) == 0).all()
+
+
+def test_the_restart_rule_gives_the_restart_to_the_right_team():
+    """A throw-in: the ball is out (dead) with an away player next to it, then the throw
+    passes close to a home player for 8 frames before anyone has it. Without the rule the
+    HMM gives it to home (the only evidence after the restart); with it, away keeps it."""
+    codes = [H] * 100 + [N] * 50 + [A] * 10 + [H] * 8 + [N] * 54
+    dead = [0.0] * 100 + [1.0] * 60 + [0.0] * 62
+
+    def run(**settings):
+        labels = possession.predict(fast_match(np.asarray(codes)), np.asarray(dead),
+                                    {"possession": {**HMM, **settings}})
+        return "".join(labels)
+
+    assert run()[160:] == "H" * 62
+    assert run(restart={**RESTART, "look_s": 0.4})[160:] == "A" * 62
+
+
+def test_no_restart_block_means_the_rule_is_off():
+    codes = [H] * 100 + [N] * 60 + [A] * 2 + [N] * 60
+    dead = [0.0] * 100 + [1.0] * 60 + [0.0] * 62
+    decode(codes, dead)       # fake_match has no fps: it would fail if the rule ran
+
+
+@pytest.mark.parametrize("block, key", [
+    ({**RESTART, "cost": 0}, "cost"),
+    ({**RESTART, "boost_s": "1"}, "boost_s"),
+    ({k: v for k, v in RESTART.items() if k != "look_s"}, "look_s"),
+    ("on", "restart"),
+])
+def test_bad_restart_settings_are_refused(block, key):
+    with pytest.raises((TypeError, ValueError), match=key):
+        possession._hmm(fast_match([H] * 3), np.zeros(3), {**HMM, "restart": block})
 
 # --- settings and configs -----------------------------------------------------------------------
 
