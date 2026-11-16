@@ -13,6 +13,11 @@
 # placement config, better on 7/7 matches in all four runs: +0.056 / +0.060 (seed 0 random /
 # stoppage), +0.055 / +0.055 (seed 1, never used for tuning). Our match: D unchanged, 1,935 frames
 # H <-> A, possessions 455 -> 501 in the graded halves.
+# Then the dead score blends gap_chance (x 0.3) with the learned score of #54 v2 (x 0.7), model
+# trained on stoppage gaps and fitted on all 7 IDSSE matches (= configs/exp/poss-blend-learned70-
+# stopmodel-final.yaml). Dev set (leave-one-match-out models) vs the touch config: +0.040 / +0.023
+# (seed 0 random / stoppage), +0.037 / +0.022 (seed 1), better on 27 of 28 match-runs. Fails the
+# +0.04 rule on stoppage cuts: exception taken (RESULTS.md). Our match: graded D 43.5% -> 44.7%.
 seed: 0
 
 ball:
@@ -27,8 +32,9 @@ deadball:
     before_kickoff: 1.0   # certain: graded second-half frames before its kickoff are always dead
     out_of_bounds: 1.0    # strongest clue: enough on its own
     before_restart: 0.6   # enough on its own: before a tagged restart the ball is dead, even if players move
-    gap_chance: 1.0       # already a chance (0-1) inside each ball gap, 0 where the ball is seen
+    gap_chance: 0.3       # a chance (0-1) inside each ball gap, 0 where the ball is seen; x 0.3 + learned x 0.7 = a weighted average
     still_ball_at_spot: 0.6   # NEW: a seen ball standing still at a restart spot (free kick, throw-in, goal kick set up)
+    learned: 0.7          # NEW: per-frame chance from the #54 model (learned_dead.py), blended with gap_chance
   out_margin: 1.0         # metres past the line before we call it out
   still_speed: 1.0        # m/s: players' median speed below this counts as standing (gap clue players_still)
   speed:                  # player speed from positions (velocity.player_speed); the ATD speed field is not used
@@ -64,6 +70,8 @@ deadball:
     goal kick: 20
     free kick: 25
     kick off (after goal): 45   # includes the celebration
+  learned:                # NEW: the fitted per-frame model (learned_dead.py); weight in `weights`
+    model: models/deadball_stoppage_all.json   # v2, trained on stoppage gaps, all 7 IDSSE matches
 
 possession:
   method: hmm
