@@ -13,7 +13,10 @@ from falafelona.config import load_config
 from falafelona.vendor import REPO_ROOT
 
 H, A, D = possession.H_STATE, possession.A_STATE, possession.D_STATE
+# final.yaml as it was before the touch evidence (= configs/exp/poss-place-late.yaml): these tests
+# are about the placement, and the touch block would add its own switches on the made-up tracks
 FINAL = load_config(REPO_ROOT / "configs" / "final.yaml")
+FINAL["possession"].pop("touch", None)
 PITCH = (105.0, 68.0)
 FPS = 25.0
 TABLE = possession.switch_table(3.5, 6.0, 6.0)
@@ -254,7 +257,7 @@ def test_the_placement_configs_are_final_with_another_placement(name, value):
     assert cfg == final
 
 
-def test_poss_place_late_is_final_yaml():
+def test_poss_place_late_is_final_yaml_without_the_touch_evidence():
     assert load_config(REPO_ROOT / "configs" / "exp" / "poss-place-late.yaml") == FINAL
 
 
