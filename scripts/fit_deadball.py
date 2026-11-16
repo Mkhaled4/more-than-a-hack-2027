@@ -11,7 +11,9 @@
 #   .venv/bin/python scripts/fit_deadball.py
 # Prints aggregates only: row counts, log losses and the fitted coefficients (model numbers, not
 # data). Writes only the JSON files under --out (default models/). Same data, same files.
-# Needs src/falafelona/learned_dead.py (tools/apply_learned_patch.py has patched devset.py).
+# Needs src/falafelona/learned_dead.py and the patched deadball.py / devset.py (all in this PR).
+# Variants (review round): --placements random|stoppage trains on one kind of gap only,
+#   --drop gap:log2_gap_s leaves a feature out, --tag NAME writes models/deadball_NAME_*.json.
 
 import argparse
 from pathlib import Path
@@ -34,12 +36,12 @@ def merge(parts):
                    np.concatenate([p[name][1] for p in parts])) for name in learned_dead.PARTS}
 
 
-def match_rows(dev, cfg, dev_cfg, seeds, stride):
-    """Training rows of one dev match: both gap placements x every training seed."""
+def match_rows(dev, cfg, dev_cfg, seeds, stride, placements=None):
+    """Training rows of one dev match: the gap placements (both by default) x every seed."""
     section = cfg["deadball"]
     players = learned_dead.player_inputs(dev.match, section)    # the same for every cut
     parts = []
-    for placement in devset.PLACEMENTS:
+    for placement in placements or devset.PLACEMENTS:
         degrade = {**dev_cfg["degrade"], "placement": placement}
         for seed in seeds:
             cut, _ = devset.degrade_ball(dev.match, degrade,
@@ -47,6 +49,21 @@ def match_rows(dev, cfg, dev_cfg, seeds, stride):
             cleaned = DataCleaner(cut, cfg).return_cleaned_data()
             parts.append(learned_dead.training_rows(cleaned, dev.truth, section, stride, players))
     return merge(parts)
+
+
+def drop_features(rows, drops):
+    """Zero the columns named in drops ("gap:log2_gap_s"), so their fitted weight is 0.
+
+    A constant column fits to 0 (learned_dead.fit_logistic), so the model file keeps its format
+    and the pipeline needs no change. Edits rows in place.
+    """
+    for drop in drops:
+        part, _, name = drop.partition(":")
+        if part not in learned_dead.PARTS or name not in learned_dead.PARTS[part]:
+            raise SystemExit(f"--drop {drop!r}: use part:feature, for example gap:log2_gap_s")
+        column = learned_dead.PARTS[part].index(name)
+        for match_rows_ in rows.values():
+            match_rows_[part][0][:, column] = 0.0
 
 
 def main(argv=None):
@@ -60,11 +77,18 @@ def main(argv=None):
     parser.add_argument("--l2", type=float, default=10.0, help="ridge on the coefficients")
     parser.add_argument("--train-seeds", type=int, nargs="+", default=[100, 101],
                         help="seeds of the training cuts (the dev set uses 0 and 1)")
+    parser.add_argument("--placements", choices=[*devset.PLACEMENTS, "both"], default="both",
+                        help="train on one kind of gap only (default: both)")
+    parser.add_argument("--drop", nargs="+", default=[], metavar="PART:FEATURE",
+                        help="leave these features out, for example gap:log2_gap_s")
+    parser.add_argument("--tag", default="",
+                        help="name part of the files: models/deadball_<tag>_lomo_<match>.json")
     args = parser.parse_args(argv)
     if args.stride < 1 or args.l2 < 0:
         parser.error("--stride must be at least 1 and --l2 0 or more")
 
     cfg = load_config(args.config)
+    placements = None if args.placements == "both" else (args.placements,)
     dev_cfg = yaml.safe_load(Path(args.devset).read_text())
     ids = args.matches or dev_cfg["matches"]
     root = devset.idsse_dir()
@@ -72,15 +96,17 @@ def main(argv=None):
     rows = {}
     for match_id in ids:
         rows[match_id] = match_rows(devset.load_idsse(match_id, root=root), cfg, dev_cfg,
-                                    args.train_seeds, args.stride)
+                                    args.train_seeds, args.stride, placements)
         print(f"{match_id}: " + ", ".join(
             f"{part} rows {len(rows[match_id][part][1])} "
             f"(dead {rows[match_id][part][1].mean():.2f})" for part in learned_dead.PARTS))
 
+    drop_features(rows, args.drop)
     folds = learned_dead.fit_folds(rows, args.l2)
+    prefix = f"deadball_{args.tag}_" if args.tag else "deadball_"
     out = Path(args.out)
     for name, fold in folds.items():
-        path = out / ("deadball_all.json" if name == "all" else f"deadball_lomo_{name}.json")
+        path = out / (f"{prefix}all.json" if name == "all" else f"{prefix}lomo_{name}.json")
         learned_dead.save_model(path, fold["fits"], fold["trained_on"], args.l2, fold["rows"])
         held = ", ".join(f"{part} log loss {loss:.3f} vs base rate {base:.3f}"
                          for part, (loss, base, _) in fold["holdout"].items())

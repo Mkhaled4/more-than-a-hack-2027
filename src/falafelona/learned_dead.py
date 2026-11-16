@@ -41,7 +41,7 @@ from pathlib import Path
 import numpy as np
 
 FORMAT = "falafelona-deadball-logreg"
-VERSION = 1                  # bump when a feature changes, so an old model file is refused
+VERSION = 2                  # bump when a feature changes, so an old model file is refused
 
 # Windows of the player-speed features, in seconds on each side of the frame, and the other
 # constants of the features. They are part of the model: change one, bump VERSION.
@@ -51,6 +51,7 @@ LINE_SCALE_M = 3.0           # exp(-distance / scale): 1 on a line, 0.37 at 3 m
 CENTRE_SCALE_M = 5.0
 SPEED_CAP = 30.0             # m/s, ball speeds above this count as this
 SLOW_RUN_CAP_S = 30.0
+SPEED_LOOK_S = 0.5           # s: how far from a gap's edge to look for a known ball speed
 
 # The settings the features read from the `deadball:` section (numbers >= 0, checked by
 # deadball.check_config). The speed block `speed:` and the ball block `ball_speed:` are read too.
@@ -217,6 +218,22 @@ def _near(distance, scale):
     return np.where(np.isfinite(distance), near, 0.0)
 
 
+def _speed_near(speed, start, step, frames, period):
+    """The first known ball speed from frame `start` going `step` (+1 or -1) frames at a time.
+
+    Looks at most `frames` frames and stays inside the half of `start`. NaN if none is known.
+    The speed is unknown on the frames next to a gap (it needs seen positions on BOTH sides), so
+    the speed at a gap's edge has to be read a few frames in.
+    """
+    for k in range(frames + 1):
+        i = start + step * k
+        if i < 0 or i >= len(speed) or period[i] != period[start]:
+            break
+        if np.isfinite(speed[i]):
+            return float(speed[i])
+    return float("nan")
+
+
 def frame_features(inp):
     """Features of every frame. Returns (in_gap bool[n], gap_x float[n, 12], vis_x float[n, 13]).
 
@@ -259,19 +276,22 @@ def frame_features(inp):
     gap = np.zeros((n, len(GAP_FEATURES)))
     gap[:, 8:11] = np.column_stack(speed_windows)
     gap[:, 11] = slow_share
+    look = round(SPEED_LOOK_S * fps)
     for first, stop in inp["gap_runs"]:
         before = first > 0 and period[first - 1] == period[first]
         after = stop < n and period[stop] == period[first]
         gap[first:stop, 0] = np.log2((stop - first) / fps)
         if before:
             gap[first:stop, 1] = _near(line[first - 1:first], LINE_SCALE_M)[0]
-            if known[first - 1]:
-                gap[first:stop, 5] = np.log1p(min(ball_speed[first - 1], SPEED_CAP))
+            last = _speed_near(ball_speed, first - 1, -1, look, period)
+            if np.isfinite(last):
+                gap[first:stop, 5] = np.log1p(min(last, SPEED_CAP))
         if after:
             gap[first:stop, 2] = _near(line[stop:stop + 1], LINE_SCALE_M)[0]
             gap[first:stop, 3] = _near(centre[stop:stop + 1], CENTRE_SCALE_M)[0]
-            if known[stop]:
-                gap[first:stop, 6] = np.log1p(min(ball_speed[stop], SPEED_CAP))
+            nxt = _speed_near(ball_speed, stop, 1, look, period)
+            if np.isfinite(nxt):
+                gap[first:stop, 6] = np.log1p(min(nxt, SPEED_CAP))
         gap[first:stop, 4] = not (before and after)
         gap[first:stop, 7] = inp["slow_players"][first:stop].mean()
     gap[~in_gap] = 0.0
