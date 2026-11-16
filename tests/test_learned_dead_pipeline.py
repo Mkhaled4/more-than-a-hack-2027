@@ -23,7 +23,8 @@ NAMES = [*DEV_NAMES, "poss-learned-final", "poss-learned-touch-final"]
 DEAD_WEIGHT = {"poss-learned": 2.0, "poss-learned-dw1.5": 1.5, "poss-learned-dw3.0": 3.0,
                "poss-learned-final": 2.0, "poss-learned-touch": 2.0,
                "poss-learned-touch-final": 2.0}
-BASE = {name: FINAL if "touch" in name else PRE_TOUCH for name in NAMES}
+TOUCH = load_config(EXP / "poss-touch-best.yaml")     # final.yaml before the blend
+BASE = {name: TOUCH if "touch" in name else PRE_TOUCH for name in NAMES}
 WEIGHTS = {"before_kickoff": 1.0, "out_of_bounds": 1.0, "before_restart": 0.6, "learned": 1.0}
 
 
@@ -36,9 +37,10 @@ def with_toy_model(cfg, tmp_path):
     return cfg
 
 
-def test_final_yaml_does_not_use_the_learned_score():
-    assert "learned" not in FINAL["deadball"]            # off in the submission until it passes
-    assert "learned" not in FINAL["deadball"]["weights"]
+def test_final_yaml_blends_the_full_stoppage_model():
+    assert FINAL["deadball"]["weights"]["learned"] == 0.7      # exception taken (RESULTS.md)
+    assert FINAL["deadball"]["learned"]["model"] == "models/deadball_stoppage_all.json"
+    learned_dead.load_model(learned_dead.model_path(FINAL["deadball"]))   # the file is committed
 
 
 @pytest.mark.parametrize("name", NAMES)

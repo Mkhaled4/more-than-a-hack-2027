@@ -15,7 +15,8 @@ from falafelona.vendor import REPO_ROOT
 H, A, D = possession.H_STATE, possession.A_STATE, possession.D_STATE
 # final.yaml as it was before the touch evidence (= configs/exp/poss-place-late.yaml): these tests
 # are about the placement, and the touch block would add its own switches on the made-up tracks
-FINAL = load_config(REPO_ROOT / "configs" / "final.yaml")
+# (before the dead-score blend too: poss-touch-best.yaml is final.yaml with touch, before the blend)
+FINAL = load_config(REPO_ROOT / "configs" / "exp" / "poss-touch-best.yaml")
 FINAL["possession"].pop("touch", None)
 PITCH = (105.0, 68.0)
 FPS = 25.0
