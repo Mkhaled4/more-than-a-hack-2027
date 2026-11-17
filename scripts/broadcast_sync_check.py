@@ -198,7 +198,32 @@ def sync(tac, bro_ball, bro_players, bro_slots, bro_valid, pitch):
             matched.append((first, stop, offset, fit, flipped))
         else:
             rejected += 1
-    return matched, len(runs), rejected
+    return matched, len(runs), rejected, runs
+
+
+def borrow(tac, bro_players, bro_slots, runs, matched, pitch):
+    """Second pass: a stretch the ball could not place takes the offset of the nearest matched
+    stretch before or after it (the offset drifts slowly between replays), if the players agree
+    there (median distance <= MAX_PLAYER_M). Returns the extra matches."""
+    done = {(m[0], m[1]) for m in matched}
+    ordered = sorted(matched)
+    extra = []
+    for first, stop in runs:
+        if (first, stop) in done:
+            continue
+        before = [m for m in ordered if m[1] <= first]
+        after = [m for m in ordered if m[0] >= stop]
+        best = None
+        for m in (before[-1:] + after[:1]):
+            offset, flipped = m[2], m[4]
+            players = flip(bro_players, pitch) if flipped else bro_players
+            fit = player_fit(players, bro_slots, tac.players_xy, tac.slot_team,
+                             np.arange(first, stop), offset)
+            if fit <= MAX_PLAYER_M and (best is None or fit < best[3]):
+                best = (first, stop, offset, fit, flipped)
+        if best is not None:
+            extra.append(best)
+    return extra
 
 
 # --- the report --------------------------------------------------------------------------------
@@ -233,13 +258,18 @@ def report(tac, bro_ball, bro_players, bro_slots, bro_valid, pitch):
                       else np.ones(tac.n_frames, bool), graded),
              describe("broadcast", bro_ball, bro_players, bro_slots, bro_valid)]
 
-    matched, n_runs, rejected = sync(tac, bro_ball, bro_players, bro_slots, bro_valid, pitch)
+    matched, n_runs, rejected, runs = sync(tac, bro_ball, bro_players, bro_slots, bro_valid,
+                                           pitch)
+    extra = borrow(tac, bro_players, bro_slots, runs, matched, pitch)
     bro_total = len(bro_ball)
     covered = sum(b - a for a, b, *_ in matched)
     lines += ["sync (ball tracks placed, players checked):",
               (f"  stretches >= {MIN_STRETCH_S:.0f} s: {n_runs}; matched {len(matched)}, "
                f"rejected {rejected}"),
               f"  broadcast frames in matched stretches: {covered} ({covered / bro_total:.1%})",
+              (f"  second pass (offset borrowed from a neighbour, players agree): "
+               f"{len(extra)} more stretches, {sum(b - a for a, b, *_ in extra)} frames; "
+               f"player distance (m) {_q([m[3] for m in extra])}"),
               (f"  matched stretches: player distance (m) {_q([m[3] for m in matched])}; "
                f"length (s) {_q([(m[1] - m[0]) / fps for m in matched])}; "
                f"flipped orientation {sum(m[4] for m in matched)} of {len(matched)}")]
@@ -248,13 +278,22 @@ def report(tac, bro_ball, bro_players, bro_slots, bro_valid, pitch):
         steps = np.diff(offsets[np.argsort([m[0] for m in matched])])
         lines.append(f"  offset changes between consecutive stretches (s): {_q(np.abs(steps))}")
 
+    lines.append("ball (first pass only, then with the second pass):")
+    lines += ball_lines(tac, bro_ball, matched, pitch, graded)
+    lines += ball_lines(tac, bro_ball, matched + extra, pitch, graded)
+    return "\n".join(lines)
+
+
+def ball_lines(tac, bro_ball, matched, pitch, graded):
     # broadcast ball onto tactical frames
     filled = np.full((tac.n_frames, 2), np.nan)
     hits = np.zeros(tac.n_frames, dtype=int)
+    covered = np.zeros(tac.n_frames, dtype=bool)
     for first, stop, offset, _rms, flipped in matched:
         frames = np.arange(first, stop)
         target = frames + offset
         ok = (target >= 0) & (target < tac.n_frames)
+        covered[target[ok]] = True
         ball = bro_ball[frames[ok]].copy()
         if flipped:
             ball[:, 0] = pitch[0] - ball[:, 0]
@@ -270,16 +309,17 @@ def report(tac, bro_ball, bro_players, bro_slots, bro_valid, pitch):
     agree = (f"  where both see the ball ({int(both.sum())} frames): distance (m) {_q(d)}; "
              f"<= 2 m {np.mean(d <= 2):.0%}, <= 5 m {np.mean(d <= 5):.0%}") if both.any() \
         else "  no frame where both see the ball"
-    lines += ["ball:",
-              (f"  tactical graded frames covered by a matched broadcast frame with a ball: "
+    in_cover = gap & covered
+    return [(f"  tactical graded frames covered by a matched broadcast frame with a ball: "
                f"{np.mean(bro_seen[graded]):.1%}"),
               agree,
               (f"  tactical gap frames (graded, raw ball missing): {int(gap.sum())}; "
                f"filled by broadcast {int((gap & bro_seen).sum())} "
-               f"({(gap & bro_seen).sum() / max(1, gap.sum()):.1%})"),
-              (f"  tactical frames hit by more than one broadcast stretch (replays): "
-               f"{int((hits > 1).sum())}")]
-    return "\n".join(lines)
+               f"({(gap & bro_seen).sum() / max(1, gap.sum()):.1%}); of the gap frames inside "
+               f"matched stretches ({int(in_cover.sum())}): "
+               f"{(in_cover & bro_seen).sum() / max(1, in_cover.sum()):.1%}"),
+            (f"  tactical frames hit by more than one broadcast stretch (replays): "
+             f"{int((hits > 1).sum())}")]
 
 
 def main(argv=None):
