@@ -34,10 +34,11 @@ import numpy as np
 from falafelona import learned_dead as ld
 
 FORMAT = "falafelona-team-logreg"
-VERSION = 4                  # bump when a feature changes, so an old model file is refused
+VERSION = 5                  # bump when a feature changes, so an old model file is refused
 #                              v2: trained home/away-symmetric (SWAP), no home lean
 #                              v3: gap features interp_margin, push
 #                              v4: gap features push_short, push_long, push_turn, field_pos
+#                              v5: gap features width_diff, length_diff, line_diff, spread at the gap edges
 
 # Constants of the features. They are part of the model: change one, bump VERSION.
 MARGIN_CAP_M = 15.0          # |distance margin| above this counts as this
@@ -65,6 +66,7 @@ GAP_FEATURES = (
     "log2_gap_s", "frac", "last_margin", "next_margin", "last_margin_x_left",
     "next_margin_x_done", "touch_before", "touch_after_x_done", "spread_diff", "open_ended",
     "interp_margin", "push", "push_short", "push_long", "push_turn", "field_pos",
+    "width_diff", "length_diff", "line_diff", "spread_before", "spread_after",
 )
 PARTS = {"seen": SEEN_FEATURES, "gap": GAP_FEATURES}
 CONFIG_KEYS = ("model", "add_cost", "where")
@@ -76,7 +78,7 @@ CONFIG_KEYS = ("model", "add_cost", "where")
 # from match to match (0.43 to 0.62 on IDSSE) and says nothing about ours.
 SWAP = {
     "seen": (-1, -1, -1, 1, -1, -1, 1, 1, -1),
-    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1),
+    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1),
 }
 
 
@@ -181,6 +183,31 @@ def _touch_signal(n, period, fps, touches, teams):
     return out, sign
 
 
+def _team_std(players_xy, slot_team, team, axis):
+    """Spread (m) of a team's players along one axis (0 = x, length; 1 = y, width); NaN if < 3."""
+    v = np.asarray(players_xy, dtype=float)[:, np.asarray(slot_team) == team, axis]
+    count = np.isfinite(v).sum(axis=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        spread = np.nanstd(v, axis=1)
+    return np.where(count >= 3, spread, np.nan)
+
+
+def _line_height(players_xy, slot_team, team, direction, middle):
+    """m: how far up the pitch a team's last outfield line stands, along its own attacking
+    direction and from the half's middle: its second-deepest player (the deepest is the
+    goalkeeper). A team with the ball pushes its back line up. NaN outside the graded halves."""
+    x = np.asarray(players_xy, dtype=float)[:, np.asarray(slot_team) == team, 0]
+    sign = direction if team == "H" else -direction
+    up = (x - middle[:, None]) * sign[:, None]
+    up = np.where(np.isfinite(up), up, np.inf)
+    count = np.isfinite(up).sum(axis=1)
+    if up.shape[1] < 2:
+        return np.full(len(x), np.nan)
+    second = np.sort(up, axis=1)[:, 1]
+    return np.where((count >= 3) & (sign != 0), second, np.nan)
+
+
 def _home_direction(players_xy, slot_team, period):
     """(direction, middle) float[n]: +1 / -1 = the x direction home attacks in that half, and
     the players' middle x in that half. Home attacks away from its goalkeeper: the home player
@@ -239,6 +266,8 @@ def build_inputs(data):
     touch, touch_sign = _touch_signal(len(data.period), data.period, fps, touches, teams)
     missing = np.isnan(data.ball_xy[:, 0])
     push_v, field = _push_parts(data.players_xy, data.slot_team, data.period, fps)
+    direction, middle = _home_direction(data.players_xy, data.slot_team, data.period)
+    xy, slots = data.players_xy, data.slot_team
     return {
         "period": np.asarray(data.period),
         "fps": fps,
@@ -260,6 +289,10 @@ def build_inputs(data):
         "push_short": ld.centred_mean(push_v, data.period, round(PUSH_SHORT_S * fps)),
         "push_long": ld.centred_mean(push_v, data.period, round(PUSH_LONG_S * fps)),
         "field_pos": ld.centred_mean(field, data.period, round(PUSH_WINDOW_S * fps)),
+        "width_diff": _team_std(xy, slots, "H", 1) - _team_std(xy, slots, "A", 1),
+        "length_diff": _team_std(xy, slots, "H", 0) - _team_std(xy, slots, "A", 0),
+        "line_diff": _line_height(xy, slots, "H", direction, middle)
+        - _line_height(xy, slots, "A", direction, middle),
     }
 
 
@@ -267,12 +300,16 @@ def build_inputs(data):
 
 
 def frame_features(inp):
-    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 16]). Rows of the other part are 0."""
+    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 21]). Rows of the other part are 0."""
     period, fps = inp["period"], inp["fps"]
     n = len(period)
     in_gap = np.zeros(n, dtype=bool)
     margin = inp["margin"]
     spread = ld.centred_mean(inp["spread_diff"], period, round(SHAPE_WINDOW_S * fps))
+    shape_w = round(SHAPE_WINDOW_S * fps)
+    shape_width = ld.centred_mean(inp["width_diff"], period, shape_w)
+    shape_length = ld.centred_mean(inp["length_diff"], period, shape_w)
+    shape_line = ld.centred_mean(inp["line_diff"], period, shape_w)
 
     seen = np.zeros((n, len(SEEN_FEATURES)))
     seen[:, 0] = np.nan_to_num(margin)
@@ -326,6 +363,11 @@ def frame_features(inp):
         gap[first:stop, 13] = inp["push_long"][first:stop]
         gap[first:stop, 14] = inp["push"][first:stop] - inp["push"][first]
         gap[first:stop, 15] = inp["field_pos"][first:stop]
+        gap[first:stop, 16] = shape_width[first:stop]
+        gap[first:stop, 17] = shape_length[first:stop]
+        gap[first:stop, 18] = shape_line[first:stop]
+        gap[first:stop, 19] = spread[first - 1] if before else 0.0
+        gap[first:stop, 20] = spread[stop] if after else 0.0
     seen[in_gap] = 0.0
     gap[~in_gap] = 0.0
     return in_gap, seen, gap
