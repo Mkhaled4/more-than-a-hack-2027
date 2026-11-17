@@ -67,6 +67,7 @@ possession:
     where: gaps
   fast_ball_speed: 12
   switch_placement: 1.0
+  min_spell_s: 1.0
   touch:
     offset_s: 0.12
     min_change: 3.0

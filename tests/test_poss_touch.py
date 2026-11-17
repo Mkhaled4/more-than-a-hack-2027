@@ -178,3 +178,11 @@ def test_evidence_check_counts_and_report(dev):
     assert 0 <= d["touches_claim_right"] <= d["touches_claim"] <= d["touches_scored"]
     assert "a claimed switch" in text
     assert "touch evidence:" in text
+
+def test_a_short_spell_between_the_other_team_is_merged_but_not_after_a_stoppage():
+    h, a, d = possession.H_STATE, possession.A_STATE, possession.D_STATE
+    path = np.array([a] * 5 + [h] * 3 + [a] * 5 + [d] * 2 + [h] * 2 + [a] * 4)
+    out = possession.merge_short_spells(path, 4)
+    assert list(out[:13]) == [a] * 13          # the 3-frame H between A runs is merged
+    assert list(out[15:17]) == [h, h]          # the H right after D is kept
+    assert list(path[5:8]) == [h] * 3          # the input is not changed

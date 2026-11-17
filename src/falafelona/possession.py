@@ -501,7 +501,7 @@ CONFIG_KEYS = {
     "": ("method", "window", "dead_threshold", "dead_margin", "switch_cost", "team_evidence",
          "team_cost", "margin_scale", "near_distance", "dead_weight", "to_dead_cost",
          "from_dead_cost", "evidence_lag", "fast_ball_speed", "velocity_match", "velocity",
-         "restart", "switch_placement", "touch", "learned"),
+                  "restart", "switch_placement", "min_spell_s", "touch", "learned"),
     "velocity": velocity.SETTING_KEYS,
     "touch": TOUCH_KEYS,
     "velocity_match": ("max_diff", "control_distance", "cost"),
@@ -616,6 +616,24 @@ def _number(section, key, *, whole=False):
         raise ValueError(f"possession.{key} must be {kind} >= 0, got {value!r}")
     return value
 
+def merge_short_spells(path: np.ndarray, min_len: int) -> np.ndarray:
+    """int[n]: path with every H / A run shorter than min_len frames that sits between two runs
+    of the OTHER team given to that team. CHALLENGE.md: a touch without control or a deflection
+    is not a change of possession. Runs next to D (a restart has a clear possessor) or at the
+    ends are kept. Pure function: the input is not modified."""
+    out = np.asarray(path).copy()
+    if min_len <= 1 or len(out) == 0:
+        return out
+    edges = np.flatnonzero(np.diff(out)) + 1
+    starts = np.concatenate(([0], edges))
+    stops = np.concatenate((edges, [len(out)]))
+    codes = out[starts]
+    for k in range(1, len(starts) - 1):
+        if codes[k] == D_STATE or stops[k] - starts[k] >= min_len:
+            continue
+        if codes[k - 1] == codes[k + 1] != D_STATE:
+            out[starts[k]:stops[k]] = codes[k - 1]
+    return out
 
 def _placement(section):
     """The switch_placement fraction (0 to 1), or None when it is not set (off)."""
@@ -721,6 +739,9 @@ def _hmm(match, dead_score, section):
     placement = _placement(section)
     if placement is not None:
         path = place_switches(path, costs, placement)
+    if "min_spell_s" in section:
+        min_len = int(np.floor(_number(section, "min_spell_s") * match.fps + 0.5))
+        path = merge_short_spells(path, min_len)
     return np.array(STATES)[path]
 
 
