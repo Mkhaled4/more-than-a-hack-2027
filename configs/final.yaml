@@ -18,6 +18,13 @@
 # stopmodel-final.yaml). Dev set (leave-one-match-out models) vs the touch config: +0.040 / +0.023
 # (seed 0 random / stoppage), +0.037 / +0.022 (seed 1), better on 27 of 28 match-runs. Fails the
 # +0.04 rule on stoppage cuts: exception taken (RESULTS.md). Our match: graded D 43.5% -> 44.7%.
+# Then the decoder costs from the cost sweep (scripts/cost_sweep.py): switch 10, dead costs 18 / 18
+# (was 3.5 / 6 / 6). Dev set vs the blend config: +0.022 / +0.021 (seed 0 random / stoppage),
+# better on 7/7 in both; leave-one-match-out +0.017 to +0.021, 27/28. Fails the +0.04 rule:
+# exception. Our match: possessions 518 -> 410.
+# Then switch timing: evidence_lag 18 (was 12) and switch_placement 1.0 (was 0.75), on top of
+# 10/18/18. Dev set vs cost-sw10-td18-fd18-dw2: +0.009 / +0.010 (seed 0 random / stoppage),
+# +0.010 / +0.011 (seed 1, held out); better on 24 of 28 match-runs. Fails the +0.04 rule: exception.
 seed: 0
 
 ball:
@@ -80,12 +87,12 @@ possession:
   margin_scale: 1.0       # m: a 3 m margin is about 95% sure
   near_distance: 5.0      # m: nearest player this far away = no evidence
   dead_weight: 2.0        # how strongly the dead score pulls towards D (and away from H / A)
-  switch_cost: 3.5        # cost of a change between H and A (was 7; the fast-ball rule removes fake switches)
-  to_dead_cost: 6.0       # cost of going from H or A into D
-  from_dead_cost: 6.0     # cost of leaving D for H or A
-  evidence_lag: 12        # frames (0.5 s): H / A evidence moved later; the receiver nears the ball before touching it
+  switch_cost: 10         # cost of a change between H and A (was 3.5; cost sweep, scripts/cost_sweep.py)
+  to_dead_cost: 18        # cost of going from H or A into D (was 6)
+  from_dead_cost: 18      # cost of leaving D for H or A (was 6)
+  evidence_lag: 18        # frames (0.72 s): H / A evidence moved later (was 12; timing sweep with the 10/18/18 costs)
   fast_ball_speed: 12     # m/s: no H / A evidence while the ball moves faster (pass or shot)
-  switch_placement: 0.75  # NEW: H / A switches placed 75% into their no-evidence stretch (Viterbi puts them at the earliest frame)
+  switch_placement: 1.0   # H / A switches placed at the end of their no-evidence stretch (was 0.75; timing sweep)
   touch:                  # NEW: a sharp change of the ball's velocity = the nearest player touched it
     offset_s: 0.12        # s: velocity before vs after, this far either side of the frame
     min_change: 3.0       # m/s: change of velocity (direction or speed) that counts as a touch
