@@ -277,3 +277,32 @@ def test_smoothing_the_ball_rounds_corners_and_keeps_gaps():
     blurred = diag.ball_stats(replace(match, ball_xy=smooth))
     assert blurred["peaks_per_seen_min"] <= sharp["peaks_per_seen_min"]
     assert blurred["jitter_cm"] <= sharp["jitter_cm"] + 1e-9
+
+
+
+# --- v6: changes inside the gap, team clues x gap position (non-linear step A) ------------------
+
+
+def test_v6_gap_features_start_at_zero_and_flip_with_the_teams():
+    in_gap, _, gap = lt.frame_features(lt.build_inputs(cleaned()))
+    f = list(lt.GAP_FEATURES)
+    first = np.flatnonzero(in_gap)[0]
+    for name in ("field_turn", "line_turn", "width_turn", "length_turn"):
+        assert gap[first, f.index(name)] == 0.0                 # no change at the gap's start
+    assert len(lt.SWAP["gap"]) == len(lt.GAP_FEATURES)
+    assert all(lt.SWAP["gap"][f.index(n)] == -1 for n in lt.GAP_FEATURES[21:])
+    assert np.isfinite(gap).all()
+
+
+def test_a_v5_model_file_still_loads_and_gives_a_chance(tmp_path):
+    import json
+
+    path, _ = toy_model(tmp_path)
+    doc = json.loads(path.read_text())
+    k = len(lt.GAP_FEATURES_V5)
+    doc["version"] = 5
+    doc["gap"].update(features=list(lt.GAP_FEATURES_V5), mean=doc["gap"]["mean"][:k],
+                      scale=doc["gap"]["scale"][:k], coef=doc["gap"]["coef"][:k])
+    path.write_text(json.dumps(doc))
+    chance = lt.home_chance(cleaned(), learned_cfg(path)["possession"])
+    assert chance.shape == (th.N,) and ((chance > 0) & (chance < 1)).all()

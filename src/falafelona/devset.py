@@ -93,9 +93,16 @@ PAIRED_EXTRA = ("spell_precision", "spell_recall", "alive_dead_f1", "team_acc", 
 #   dead       every frame
 #   dead_gaps  only frames where the cleaned ball is missing
 #   dead_seen  only frames where the cleaned ball is seen
-ORACLES = ("dead", "dead_gaps", "dead_seen")
+#   switch     NOT the dead score: inside the cleaned ball's gaps, the H <-> A switch cost drops to
+#              ORACLE_SWITCH_COST within +/- 0.5 s of every true change of team (a perfect
+#              learned_switch hazard). Says whether knowing WHEN possession changes in a gap helps.
+#   team_gaps  NOT the dead score: inside the cleaned ball's gaps, the true team gets extra
+#              evidence (ORACLE_TEAM_COST per frame on the other team). A perfect gap team model.
+ORACLES = ("dead", "dead_gaps", "dead_seen", "switch", "team_gaps")
+DEAD_ORACLES = ("dead", "dead_gaps", "dead_seen")
+ORACLE_SWITCH_COST = 2.0
+ORACLE_TEAM_COST = 2.0
 ORACLE_TAG = " + oracle "         # report name: "<config> + oracle <mode>"
-
 
 @dataclass
 class DevMatch:
@@ -1119,8 +1126,9 @@ def oracle_dead_score(dead_score, truth, ball_missing, mode):
     1.0 where the truth is D, 0.0 where it is H or A; truth X and frames outside the mode keep
     our own score. ball_missing: bool[n], True where the CLEANED ball is missing.
     """
-    if mode not in ORACLES:
-        raise ValueError(f"unknown oracle '{mode}', expected one of {', '.join(ORACLES)}")
+    if mode not in DEAD_ORACLES:
+        raise ValueError(f"unknown oracle '{mode}' for the dead score, expected one of "
+                         f"{', '.join(DEAD_ORACLES)}")
     truth = np.asarray(truth)
     missing = np.asarray(ball_missing, dtype=bool)
     if truth.shape != missing.shape or len(truth) != len(dead_score):
@@ -1131,7 +1139,28 @@ def oracle_dead_score(dead_score, truth, ball_missing, mode):
     out[where] = (truth[where] == "D").astype(np.float64)
     return out
 
+def oracle_switch_cfg(cfg, truth, ball_missing, period, fps):
+    """cfg with a per-frame H <-> A switch cost from the truth (oracle "switch"): the config's
+    switch_cost everywhere, ORACLE_SWITCH_COST on gap frames near a true change of team.
+    Handed to possession through a private key that no YAML file can set."""
+    section = cfg["possession"]
+    if "switch_cost" not in section:
+        raise ValueError("oracle 'switch' needs a possession method with a switch_cost")
+    near = learned_switch.switch_target(truth, period, fps) & np.asarray(ball_missing, dtype=bool)
+    base = float(section["switch_cost"])
+    costs = np.where(near, min(ORACLE_SWITCH_COST, base), base)
+    return {**cfg, "possession": {**section, "_oracle_team_switch": costs}}
 
+def oracle_team_cfg(cfg, truth, ball_missing):
+    """cfg with extra H / A costs from the truth inside gaps (oracle "team_gaps"): on gap frames
+    whose truth is H the A state costs ORACLE_TEAM_COST more, and the other way round. D and X
+    frames get nothing. Handed to possession through a private key no YAML file can set."""
+    truth = np.asarray(truth)
+    missing = np.asarray(ball_missing, dtype=bool)
+    extra = np.zeros((len(truth), 2))
+    extra[missing & (truth == "H"), 1] = ORACLE_TEAM_COST     # against A
+    extra[missing & (truth == "A"), 0] = ORACLE_TEAM_COST     # against H
+    return {**cfg, "possession": {**cfg["possession"], "_oracle_team_extra": extra}}
 def oracle_name(name, mode):
     """The report name of config `name` run with oracle `mode`."""
     return f"{name}{ORACLE_TAG}{mode}"
@@ -1146,8 +1175,9 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
     tags: give every match simulated restart tags (simulate_tags, dev_cfg["tags"]). They are
     drawn with their own seed, so the degraded ball is the same with or without them.
     oracles: modes from ORACLES. Each config is also run once per mode, with the dead score
-    replaced by the truth where the mode says (oracle_dead_score), on the same cut ball, and
-    scored as "<config> + oracle <mode>". Without oracles the result is exactly as before.
+    replaced by the truth where the mode says (oracle_dead_score), or for "switch" with the true
+    switch times inside gaps (oracle_switch_cfg), on the same cut ball, and scored as
+    "<config> + oracle <mode>". Without oracles the result is exactly as before.
     Returns {"matches": {id: {"ball_missing": share, **report}}, "scores": {name: {id: score}}},
     plus "oracle_of": {oracle name: config name} when oracles were asked for, and
     "diagnosis": {name: {id: spell_diagnosis}} when diagnose is True.
@@ -1199,15 +1229,22 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
                     **evidence_check(cleaned, dev.truth, cfg["possession"]),
                 }
             for mode in oracles:
-                oracle = oracle_dead_score(dead_score, dev.truth, missing, mode)
-                labels = predict_labels(match, cfg, (cleaned, track, oracle))
+                if mode == "switch":
+                    switch_cfg = oracle_switch_cfg(cfg, dev.truth, missing, cleaned.period,
+                                                   match.fps)
+                    labels = predict_labels(match, switch_cfg, prepared[key])
+                elif mode == "team_gaps":
+                    team_cfg = oracle_team_cfg(cfg, dev.truth, missing)
+                    labels = predict_labels(match, team_cfg, prepared[key])
+                else:
+                    oracle = oracle_dead_score(dead_score, dev.truth, missing, mode)
+                    labels = predict_labels(match, cfg, (cleaned, track, oracle))
                 out["scores"][oracle_name(name, mode)][dev.match_id] = score_labels(
                     dev.truth, labels, bootstrap_n)
                 if diagnose:
                     out["diagnosis"][oracle_name(name, mode)][dev.match_id] = spell_diagnosis(
                         dev.truth, labels, missing, match.fps)
     return out
-
 
 # --- the report --------------------------------------------------------------------------------
 

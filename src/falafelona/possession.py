@@ -692,7 +692,10 @@ TEAM_EVIDENCE = ("nearest", "margin", "learned")
 
 def _team_switch(match, section, switch_cost):
     """float[n] H <-> A switch cost per frame from the learned hazard (learned_switch.py),
-    or None when there is no `hazard:` block (the same cost everywhere, as before)."""
+        or None when there is no `hazard:` block (the same cost everywhere, as before).
+    The dev set's switch oracle hands in the costs itself (devset.oracle_switch_cfg)."""
+    if "_oracle_team_switch" in section:
+        return np.asarray(section["_oracle_team_switch"], dtype=float)
     if "hazard" not in section:
         return None
     from falafelona import learned_switch
@@ -758,6 +761,8 @@ def _hmm(match, dead_score, section):
     learned_extra = _learned_extra(match, section, evidence)
     if learned_extra is not None:
         team = team + learned_extra
+    if "_oracle_team_extra" in section:  # dev set only: devset.oracle_team_cfg
+        team = team + np.asarray(section["_oracle_team_extra"], dtype=float)
     costs = add_dead_costs(team, dead_score, dead_weight)
     team_switch = _team_switch(match, section, table[H_STATE, A_STATE])
     path = viterbi(costs, table) if team_switch is None else viterbi(costs, table, team_switch)

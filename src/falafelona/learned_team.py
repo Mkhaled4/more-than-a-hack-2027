@@ -34,11 +34,14 @@ import numpy as np
 from falafelona import learned_dead as ld
 
 FORMAT = "falafelona-team-logreg"
-VERSION = 5                  # bump when a feature changes, so an old model file is refused
+VERSION = 6                  # bump when a feature changes, so an old model file is refused
 #                              v2: trained home/away-symmetric (SWAP), no home lean
 #                              v3: gap features interp_margin, push
 #                              v4: gap features push_short, push_long, push_turn, field_pos
 #                              v5: gap features width_diff, length_diff, line_diff, spread at the gap edges
+#                              v6: 10 more gap features: changes since the gap started and until it
+#                                  ends, and team clues x gap position / length (non-linear step A).
+#                                  v5 files still load: they use the first 21 gap columns (READABLE)
 
 # Constants of the features. They are part of the model: change one, bump VERSION.
 MARGIN_CAP_M = 15.0          # |distance margin| above this counts as this
@@ -62,13 +65,18 @@ SEEN_FEATURES = (
     "margin", "margin_w0.5", "margin_w2", "log_near", "close_diff", "touch_recent",
     "log_ball_speed", "ball_speed_unknown", "spread_diff",
 )
-GAP_FEATURES = (
+GAP_FEATURES_V5 = (
     "log2_gap_s", "frac", "last_margin", "next_margin", "last_margin_x_left",
     "next_margin_x_done", "touch_before", "touch_after_x_done", "spread_diff", "open_ended",
     "interp_margin", "push", "push_short", "push_long", "push_turn", "field_pos",
     "width_diff", "length_diff", "line_diff", "spread_before", "spread_after",
 )
+GAP_FEATURES = GAP_FEATURES_V5 + (
+    "field_turn", "line_turn", "width_turn", "length_turn", "field_to_end", "push_to_end",
+    "push_x_frac", "push_long_x_len", "field_x_frac", "line_x_frac",
+)
 PARTS = {"seen": SEEN_FEATURES, "gap": GAP_FEATURES}
+READABLE = {5: {"seen": SEEN_FEATURES, "gap": GAP_FEATURES_V5}, 6: PARTS}
 CONFIG_KEYS = ("model", "add_cost", "where")
 
 # What each feature does when home and away swap roles: -1 = flips sign (it says "home" or
@@ -78,7 +86,8 @@ CONFIG_KEYS = ("model", "add_cost", "where")
 # from match to match (0.43 to 0.62 on IDSSE) and says nothing about ours.
 SWAP = {
     "seen": (-1, -1, -1, 1, -1, -1, 1, 1, -1),
-    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1),
+    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1),
 }
 
 
@@ -300,7 +309,7 @@ def build_inputs(data):
 
 
 def frame_features(inp):
-    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 21]). Rows of the other part are 0."""
+    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 31]). Rows of the other part are 0."""
     period, fps = inp["period"], inp["fps"]
     n = len(period)
     in_gap = np.zeros(n, dtype=bool)
@@ -368,6 +377,17 @@ def frame_features(inp):
         gap[first:stop, 18] = shape_line[first:stop]
         gap[first:stop, 19] = spread[first - 1] if before else 0.0
         gap[first:stop, 20] = spread[stop] if after else 0.0
+        field, push = inp["field_pos"], inp["push"]
+        gap[first:stop, 21] = field[first:stop] - field[first]
+        gap[first:stop, 22] = shape_line[first:stop] - shape_line[first]
+        gap[first:stop, 23] = shape_width[first:stop] - shape_width[first]
+        gap[first:stop, 24] = shape_length[first:stop] - shape_length[first]
+        gap[first:stop, 25] = field[stop - 1] - field[first:stop]
+        gap[first:stop, 26] = push[stop - 1] - push[first:stop]
+        gap[first:stop, 27] = push[first:stop] * frac
+        gap[first:stop, 28] = inp["push_long"][first:stop] * np.log2(length / fps)
+        gap[first:stop, 29] = field[first:stop] * frac
+        gap[first:stop, 30] = shape_line[first:stop] * frac
     seen[in_gap] = 0.0
     gap[~in_gap] = 0.0
     return in_gap, seen, gap
@@ -394,8 +414,10 @@ def training_rows(match, truth, stride=5):
 
 
 def swap(part, x):
-    """The rows of x with home and away swapped (see SWAP)."""
-    return np.asarray(x, dtype=float) * np.asarray(SWAP[part], dtype=float)
+    """The rows of x with home and away swapped (see SWAP). x may hold only the first columns
+    (a model file of an older version)."""
+    x = np.asarray(x, dtype=float)
+    return x * np.asarray(SWAP[part][:x.shape[1]], dtype=float)
 
 
 def symmetric_chance(fit, part, x):
@@ -476,9 +498,9 @@ def load_model(path):
         raise FileNotFoundError(f"learned team model not found: {path} "
                                 "(make it with scripts/fit_team.py)")
     doc = json.loads(path.read_text())
-    if doc.get("format") != FORMAT or doc.get("version") != VERSION:
-        raise ValueError(f"{path}: not a version {VERSION} {FORMAT} file")
-    for name, features in PARTS.items():
+    if doc.get("format") != FORMAT or doc.get("version") not in READABLE:
+        raise ValueError(f"{path}: not a version {'/'.join(map(str, READABLE))} {FORMAT} file")
+    for name, features in READABLE[doc["version"]].items():
         part = doc.get(name)
         if not isinstance(part, dict) or part.get("features") != list(features):
             raise ValueError(f"{path}: the {name} part was made for other features, refit it")
@@ -503,7 +525,8 @@ def home_chance(data, section, repo_root=None):
     out = np.full(len(in_gap), 0.5)
     for part, mask, x in (("seen", graded & ~in_gap, seen_x), ("gap", graded & in_gap, gap_x)):
         if mask.any():
-            out[mask] = symmetric_chance(model[part], part, x[mask])
+            k = len(model[part]["features"])          # an older file uses the first columns
+            out[mask] = symmetric_chance(model[part], part, x[mask][:, :k])
     return out
 
 
