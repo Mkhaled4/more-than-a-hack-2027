@@ -1,8 +1,9 @@
 # ws:poss: touch evidence (possession.touch). Made-up numbers only, no match data.
 
+import copy
+
 import numpy as np
 import pytest
-import copy
 import synthetic_idsse as syn
 
 from falafelona import devset, possession, vendor
