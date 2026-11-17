@@ -492,8 +492,16 @@ def touch_events(match, section):
 
 
 def _touch(match, section):
-    """float[n, 2] touch costs, or None when possession.touch is not set (off)."""
-    events = touch_events(match, section)
+    """float[n, 2] touch costs, or None when possession.touch is not set (off).
+    The dev set's touch oracles hand in the touches themselves (devset.oracle_touch_cfg).
+    With a `touch_learned:` block the touches' teams come from learned_touch.py instead of the
+    nearest-player rule."""
+    if "touch_learned" in section and "_oracle_touch_events" not in section:
+        if "touch" not in section:
+            raise ValueError("possession.touch_learned needs the possession.touch block")
+        from falafelona import learned_touch
+        return learned_touch.touch_costs(match, section)
+    events = section.get("_oracle_touch_events") or touch_events(match, section)
     if events is None:
         return None
     block = section["touch"]
@@ -511,13 +519,14 @@ CONFIG_KEYS = {
     "": ("method", "window", "dead_threshold", "dead_margin", "switch_cost", "team_evidence",
          "team_cost", "margin_scale", "near_distance", "dead_weight", "to_dead_cost",
          "from_dead_cost", "evidence_lag", "fast_ball_speed", "velocity_match", "velocity",
-                  "restart", "switch_placement", "min_spell_s", "touch", "learned", "hazard"),
+                  "restart", "switch_placement", "min_spell_s", "touch", "learned", "hazard", "touch_learned"),
     "velocity": velocity.SETTING_KEYS,
     "touch": TOUCH_KEYS,
     "velocity_match": ("max_diff", "control_distance", "cost"),
     "restart": RESTART_KEYS,
     "learned": ("model", "add_cost", "where"),
     "hazard": ("model", "cost", "min_cost"),
+    "touch_learned": ("model", "cost"),
 }
 
 

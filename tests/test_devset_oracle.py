@@ -272,3 +272,35 @@ def test_the_team_oracle_adds_truth_evidence_only_inside_gaps(dev, monkeypatch):
     assert not extra[dev.truth == "D"].any()
     a = result["scores"]["final + oracle team_gaps"]["J03WTEST"]
     assert a["team_acc"] >= result["scores"]["final"]["J03WTEST"]["team_acc"]
+
+
+def test_team_changes_marks_the_first_frame_of_a_new_team_only():
+    truth = np.array(list("HHDDAAXAHH"))
+    period = np.ones(10, dtype=np.int8)
+    assert np.flatnonzero(devset.team_changes(truth, period)).tolist() == [4, 8]
+    period[4:] = 2                                          # a new half is not a change
+    assert np.flatnonzero(devset.team_changes(truth, period)).tolist() == [8]
+
+
+@pytest.mark.parametrize("mode", ["touch_team", "touch_all"])
+def test_the_touch_oracles_give_touches_the_true_team(dev, monkeypatch, mode):
+    seen = {}
+    real = devset.predict_labels
+
+    def spy(match, cfg, prepared=None):
+        if "_oracle_touch_events" in cfg["possession"]:
+            seen["events"] = cfg["possession"]["_oracle_touch_events"]
+            seen["fps"] = match.fps
+        return real(match, cfg, prepared)
+
+    monkeypatch.setattr(devset, "predict_labels", spy)
+    result = devset.run_devset({"final": FINAL}, DEV_CFG, [dev], oracles=(mode,))
+
+    touches, teams = seen["events"]
+    after = np.minimum(touches + round(devset.ORACLE_TOUCH_AFTER_S * seen["fps"]),
+                       len(dev.truth) - 1)
+    truth = dev.truth[after]
+    assert len(touches) == len(teams) and len(touches) > 0
+    assert (teams[truth == "H"] == 0).all() and (teams[truth == "A"] == 1).all()
+    assert (teams[~np.isin(truth, ["H", "A"])] == -1).all()
+    assert f"final + oracle {mode}" in result["scores"]

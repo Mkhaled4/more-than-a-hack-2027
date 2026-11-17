@@ -75,6 +75,9 @@ possession:
     margin: 0.1
     hold_s: 0.8
     cost: 2.0
+  touch_learned: # learned touch model: who has the ball after each touch (cost x log-odds)
+    model: models/touch_all.json
+    cost: 2.0
   restart:
     threshold: 0.5
     min_dead_s: 3.0

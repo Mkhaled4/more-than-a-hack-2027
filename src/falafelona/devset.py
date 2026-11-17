@@ -57,7 +57,15 @@ from pathlib import Path
 
 import numpy as np
 
-from falafelona import deadball, learned_dead, learned_switch, learned_team, possession, vendor
+from falafelona import (
+    deadball,
+    learned_dead,
+    learned_switch,
+    learned_team,
+    learned_touch,
+    possession,
+    vendor,
+)
 from falafelona.ball import DataCleaner
 from falafelona.io import Event, Match, read_cache, write_cache
 from falafelona.pipeline import apply_x_policy
@@ -98,9 +106,14 @@ PAIRED_EXTRA = ("spell_precision", "spell_recall", "alive_dead_f1", "team_acc", 
 #              learned_switch hazard). Says whether knowing WHEN possession changes in a gap helps.
 #   team_gaps  NOT the dead score: inside the cleaned ball's gaps, the true team gets extra
 #              evidence (ORACLE_TEAM_COST per frame on the other team). A perfect gap team model.
-ORACLES = ("dead", "dead_gaps", "dead_seen", "switch", "team_gaps")
+#   touch_team NOT the dead score: the touches we detect get the TRUE team (the truth just after
+#              the touch) instead of the nearest-player rule. Is our touch team call the problem?
+#   touch_all  as touch_team, plus a touch at every true change of team where the ball is seen.
+#              A perfect touch detector: is missing touches the problem?
+ORACLES = ("dead", "dead_gaps", "dead_seen", "switch", "team_gaps", "touch_team", "touch_all")
 DEAD_ORACLES = ("dead", "dead_gaps", "dead_seen")
 ORACLE_SWITCH_COST = 2.0
+ORACLE_TOUCH_AFTER_S = 0.3        # the truth this long after a touch says who touched it
 ORACLE_TEAM_COST = 2.0
 ORACLE_TAG = " + oracle "         # report name: "<config> + oracle <mode>"
 
@@ -1161,6 +1174,41 @@ def oracle_team_cfg(cfg, truth, ball_missing):
     extra[missing & (truth == "H"), 1] = ORACLE_TEAM_COST     # against A
     extra[missing & (truth == "A"), 0] = ORACLE_TEAM_COST     # against H
     return {**cfg, "possession": {**cfg["possession"], "_oracle_team_extra": extra}}
+
+def team_changes(truth, period):
+    """bool[n]: frames where the last team (H / A, carried over D and X inside a half) changes."""
+    truth, period = np.asarray(truth), np.asarray(period)
+    change = np.zeros(len(truth), dtype=bool)
+    last, last_period = "", None
+    for i, label in enumerate(truth):
+        if period[i] != last_period:
+            last, last_period = "", period[i]
+        if label in ("H", "A"):
+            change[i] = bool(last) and label != last
+            last = label
+    return change
+
+
+def oracle_touch_cfg(cfg, cleaned, truth, mode):
+    """cfg whose touch evidence uses the truth (oracles "touch_team" and "touch_all"): the
+    detected touches get the true team; "touch_all" also adds a touch at every true change of
+    team where the cleaned ball is seen. Needs a possession.touch block. Private key, dev only."""
+    section = cfg["possession"]
+    events = possession.touch_events(cleaned, section)
+    if events is None:
+        raise ValueError(f"oracle '{mode}' needs a possession.touch block")
+    truth = np.asarray(truth)
+    n = len(truth)
+    touches = np.asarray(events[0], dtype=np.int64)
+    if mode == "touch_all":
+        seen = np.isfinite(cleaned.ball_xy[:, 0])
+        touches = np.union1d(touches, np.flatnonzero(team_changes(truth, cleaned.period) & seen))
+    after = np.minimum(touches + round(ORACLE_TOUCH_AFTER_S * cleaned.fps), n - 1)
+    label = truth[after]
+    teams = np.where(label == "H", possession.H_STATE,
+                     np.where(label == "A", possession.A_STATE, -1))
+    return {**cfg, "possession": {**section, "_oracle_touch_events": (touches, teams)}}
+
 def oracle_name(name, mode):
     """The report name of config `name` run with oracle `mode`."""
     return f"{name}{ORACLE_TAG}{mode}"
@@ -1216,6 +1264,7 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
             cfg = learned_dead.for_match(cfg, dev.match_id)   # leave-one-match-out model paths
             cfg = learned_team.for_match(cfg, dev.match_id)
             cfg = learned_switch.for_match(cfg, dev.match_id)
+            cfg = learned_touch.for_match(cfg, dev.match_id)
             key = _stage_key(cfg)
             if key not in prepared:
                 prepared[key] = prepare_stages(match, cfg)
@@ -1233,6 +1282,9 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
                     switch_cfg = oracle_switch_cfg(cfg, dev.truth, missing, cleaned.period,
                                                    match.fps)
                     labels = predict_labels(match, switch_cfg, prepared[key])
+                elif mode in ("touch_team", "touch_all"):
+                    touch_cfg = oracle_touch_cfg(cfg, cleaned, dev.truth, mode)
+                    labels = predict_labels(match, touch_cfg, prepared[key])
                 elif mode == "team_gaps":
                     team_cfg = oracle_team_cfg(cfg, dev.truth, missing)
                     labels = predict_labels(match, team_cfg, prepared[key])
@@ -1244,6 +1296,7 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
                 if diagnose:
                     out["diagnosis"][oracle_name(name, mode)][dev.match_id] = spell_diagnosis(
                         dev.truth, labels, missing, match.fps)
+
     return out
 
 # --- the report --------------------------------------------------------------------------------
