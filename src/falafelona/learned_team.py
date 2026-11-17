@@ -34,9 +34,10 @@ import numpy as np
 from falafelona import learned_dead as ld
 
 FORMAT = "falafelona-team-logreg"
-VERSION = 3                  # bump when a feature changes, so an old model file is refused
+VERSION = 4                  # bump when a feature changes, so an old model file is refused
 #                              v2: trained home/away-symmetric (SWAP), no home lean
-PUSH_WINDOW_S = 1.0          # players' movement toward home's attacking goal, smoothed +/- this
+#                              v3: gap features interp_margin, push
+#                              v4: gap features push_short, push_long, push_turn, field_pos
 
 # Constants of the features. They are part of the model: change one, bump VERSION.
 MARGIN_CAP_M = 15.0          # |distance margin| above this counts as this
@@ -51,6 +52,9 @@ TOUCH_MARGIN_M = 0.1
 TOUCH_DECAY_S = 1.0          # a touch's signal fades like exp(-seconds since / this)
 TOUCH_LOOK_S = 2.0           # inside a gap: look this far past its end for the next touch
 SPEED_CAP = 30.0
+PUSH_WINDOW_S = 1.0          # players' movement toward home's attacking goal, smoothed +/- this
+PUSH_SHORT_S = 0.25
+PUSH_LONG_S = 3.0
 VELOCITY = {"half_window_s": 0.12, "min_points": 4, "min_each_side": 1}
 
 SEEN_FEATURES = (
@@ -60,7 +64,7 @@ SEEN_FEATURES = (
 GAP_FEATURES = (
     "log2_gap_s", "frac", "last_margin", "next_margin", "last_margin_x_left",
     "next_margin_x_done", "touch_before", "touch_after_x_done", "spread_diff", "open_ended",
-    "interp_margin", "push",
+    "interp_margin", "push", "push_short", "push_long", "push_turn", "field_pos",
 )
 PARTS = {"seen": SEEN_FEATURES, "gap": GAP_FEATURES}
 CONFIG_KEYS = ("model", "add_cost", "where")
@@ -72,8 +76,9 @@ CONFIG_KEYS = ("model", "add_cost", "where")
 # from match to match (0.43 to 0.62 on IDSSE) and says nothing about ours.
 SWAP = {
     "seen": (-1, -1, -1, 1, -1, -1, 1, 1, -1),
-    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1),
+    "gap": (1, 1, -1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1),
 }
+
 
 # --- config ------------------------------------------------------------------------------------
 
@@ -175,24 +180,15 @@ def _touch_signal(n, period, fps, touches, teams):
             out[i] = last_sign * np.exp(-(i - last_frame) / (TOUCH_DECAY_S * fps))
     return out, sign
 
-def _push(players_xy, slot_team, period, fps):
-    """float[n]: how fast all players move toward HOME's attacking goal (m/s), smoothed.
 
-    When a team has the ball both teams move toward the goal it attacks. Home attacks away from
-    its goalkeeper: per half, the home player whose mean x is furthest from the players' middle.
-    0 outside the graded halves.
-    """
+def _home_direction(players_xy, slot_team, period):
+    """(direction, middle) float[n]: +1 / -1 = the x direction home attacks in that half, and
+    the players' middle x in that half. Home attacks away from its goalkeeper: the home player
+    whose mean x is furthest from the middle. 0 / 0 outside the graded halves."""
     xy = np.asarray(players_xy, dtype=float)
     period = np.asarray(period)
     home = np.asarray(slot_team) == "H"
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        centre_x = np.nanmean(xy[..., 0], axis=1)
-    vx = np.zeros(len(period))
-    vx[1:] = (centre_x[1:] - centre_x[:-1]) * fps
-    vx[1:][period[1:] != period[:-1]] = 0.0
-    vx = np.where(np.isfinite(vx), vx, 0.0)
-    out = np.zeros(len(period))
+    direction, middle = np.zeros(len(period)), np.zeros(len(period))
     for p in np.unique(period[period > 0]):
         rows = period == p
         with warnings.catch_warnings():
@@ -201,10 +197,33 @@ def _push(players_xy, slot_team, period, fps):
         home_x = mean_x[home]
         if not np.isfinite(home_x).any():
             continue
-        middle = np.nanmedian(mean_x)
-        keeper = home_x[np.nanargmax(np.abs(home_x - middle))]
-        out[rows] = -np.sign(keeper - middle) * vx[rows]
-    return ld.centred_mean(out, period, round(PUSH_WINDOW_S * fps))
+        mid = np.nanmedian(mean_x)
+        keeper = home_x[np.nanargmax(np.abs(home_x - mid))]
+        direction[rows] = -np.sign(keeper - mid)
+        middle[rows] = mid
+    return direction, middle
+
+
+def _push_parts(players_xy, slot_team, period, fps):
+    """(speed, position) float[n], both along home's attacking direction: the players' mean
+    x speed (m/s) and their mean x (m from the half's middle). 0 outside the graded halves.
+
+    When a team has the ball both teams move toward the goal it attacks, and play is mostly in
+    the other team's half.
+    """
+    xy = np.asarray(players_xy, dtype=float)
+    period = np.asarray(period)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        centre_x = np.nanmean(xy[..., 0], axis=1)
+    vx = np.zeros(len(period))
+    vx[1:] = (centre_x[1:] - centre_x[:-1]) * fps
+    vx[1:][period[1:] != period[:-1]] = 0.0
+    vx = np.where(np.isfinite(vx), vx, 0.0)
+    direction, middle = _home_direction(xy, slot_team, period)
+    pos = np.where(np.isfinite(centre_x), centre_x - middle, 0.0)
+    return direction * vx, direction * pos
+
 
 def build_inputs(data):
     """Plain arrays for frame_features, from a Match after ball cleaning."""
@@ -219,11 +238,8 @@ def build_inputs(data):
     teams = possession.touch_teams(touches, d_home, d_away, TOUCH_DISTANCE_M, TOUCH_MARGIN_M)
     touch, touch_sign = _touch_signal(len(data.period), data.period, fps, touches, teams)
     missing = np.isnan(data.ball_xy[:, 0])
+    push_v, field = _push_parts(data.players_xy, data.slot_team, data.period, fps)
     return {
-        "players_xy": np.asarray(data.players_xy, dtype=float),
-        "ball_xy": np.asarray(data.ball_xy, dtype=float),
-        "slot_team": np.asarray(data.slot_team),
-        "push": _push(data.players_xy, data.slot_team, data.period, fps),
         "period": np.asarray(data.period),
         "fps": fps,
         "missing": missing,
@@ -237,6 +253,13 @@ def build_inputs(data):
         - _spread(data.players_xy, data.slot_team, "A"),
         "gap_runs": [(a, b) for a, b in deadball.gap_runs(missing, data.period)
                      if data.period[a] > 0],
+        "players_xy": np.asarray(data.players_xy, dtype=float),
+        "ball_xy": np.asarray(data.ball_xy, dtype=float),
+        "slot_team": np.asarray(data.slot_team),
+        "push": ld.centred_mean(push_v, data.period, round(PUSH_WINDOW_S * fps)),
+        "push_short": ld.centred_mean(push_v, data.period, round(PUSH_SHORT_S * fps)),
+        "push_long": ld.centred_mean(push_v, data.period, round(PUSH_LONG_S * fps)),
+        "field_pos": ld.centred_mean(field, data.period, round(PUSH_WINDOW_S * fps)),
     }
 
 
@@ -244,7 +267,7 @@ def build_inputs(data):
 
 
 def frame_features(inp):
-    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 10]). Rows of the other part are 0."""
+    """(in_gap bool[n], seen_x float[n, 9], gap_x float[n, 16]). Rows of the other part are 0."""
     period, fps = inp["period"], inp["fps"]
     n = len(period)
     in_gap = np.zeros(n, dtype=bool)
@@ -299,6 +322,10 @@ def frame_features(inp):
             dh, da, _, _ = _distances(inp["players_xy"][first:stop], path, inp["slot_team"])
             gap[first:stop, 10] = _margin(dh, da)
         gap[first:stop, 11] = inp["push"][first:stop]
+        gap[first:stop, 12] = inp["push_short"][first:stop]
+        gap[first:stop, 13] = inp["push_long"][first:stop]
+        gap[first:stop, 14] = inp["push"][first:stop] - inp["push"][first]
+        gap[first:stop, 15] = inp["field_pos"][first:stop]
     seen[in_gap] = 0.0
     gap[~in_gap] = 0.0
     return in_gap, seen, gap
@@ -335,6 +362,7 @@ def symmetric_chance(fit, part, x):
     Exactly symmetric: swapping home and away gives 1 - the chance, so no home lean is left.
     """
     return 0.5 * (ld.predict_proba(fit, x) + 1.0 - ld.predict_proba(fit, swap(part, x)))
+
 
 def _fit(x, y, l2):
     """fit_logistic, or a flat model (every frame at the base rate) if there is nothing to fit."""
@@ -445,4 +473,3 @@ def team_costs(chance, team_cost):
     costs[:, 0] = team_cost * np.maximum(0.0, -logit)     # H costs where home is unlikely
     costs[:, 1] = team_cost * np.maximum(0.0, logit)      # A costs where home is likely
     return costs
-

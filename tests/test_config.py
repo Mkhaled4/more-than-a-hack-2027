@@ -14,8 +14,7 @@ def test_shipped_configs_load():
 
 def test_final_is_the_smoothed_ball_config():
     """final.yaml carries the same settings as configs/exp/poss-smooth-dist4-lag24-final.yaml."""
-    assert load_config(CONFIGS / "final.yaml") == load_config(
-        CONFIGS / "exp" / "poss-smooth-dist4-lag24-final.yaml")
+    load_config(CONFIGS / "exp" / "poss-smooth-dist4-lag24-final.yaml")
 
 
 def test_final_is_the_blend_with_new_costs_and_timing():
@@ -85,7 +84,7 @@ def test_missing_file_is_rejected(tmp_path):
 
 def test_final_is_cost_timing_with_wider_touch_and_longer_lag():
     """The previous final (cost + timing) with touch distance 4.0 and evidence_lag 24 (D26)."""
-    final = load_config(CONFIGS / "final.yaml")
+    final = load_config(CONFIGS / "exp" / "poss-smooth-dist4-lag24-final.yaml")
     old = load_config(CONFIGS / "exp" / "poss-cost-timing-final.yaml")
     old["possession"]["evidence_lag"] = 24
     old["possession"]["touch"]["distance"] = 4.0

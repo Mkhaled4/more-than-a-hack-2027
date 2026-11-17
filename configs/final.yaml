@@ -62,7 +62,7 @@ possession:
   from_dead_cost: 18  # SWEEP (base: 6.0)
   evidence_lag: 24
   learned:
-    model: models/team_smooth_all.json
+    model: models/team_smooth4g_all.json
     add_cost: 0.25
     where: gaps
   fast_ball_speed: 12
