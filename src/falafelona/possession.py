@@ -501,11 +501,12 @@ CONFIG_KEYS = {
     "": ("method", "window", "dead_threshold", "dead_margin", "switch_cost", "team_evidence",
          "team_cost", "margin_scale", "near_distance", "dead_weight", "to_dead_cost",
          "from_dead_cost", "evidence_lag", "fast_ball_speed", "velocity_match", "velocity",
-         "restart", "switch_placement", "touch"),
+         "restart", "switch_placement", "touch", "learned"),
     "velocity": velocity.SETTING_KEYS,
     "touch": TOUCH_KEYS,
     "velocity_match": ("max_diff", "control_distance", "cost"),
     "restart": RESTART_KEYS,
+    "learned": ("model", "add_cost", "where"),
 }
 
 
@@ -634,7 +635,29 @@ def _team_codes(match, dead_score, section):
     return np.where(dead, Possession.NOBODY, codes).astype(np.int8)
 
 
-TEAM_EVIDENCE = ("nearest", "margin")
+def _learned_extra(match, section, evidence):
+    """float[n, 2] learned team costs added ON TOP of the main evidence, or None (off).
+
+    possession.learned.add_cost: weight of the learned model's log-odds when team_evidence is
+    not "learned". learned.where: "gaps" (default; only frames with the ball missing, where the
+    other evidence is empty) or "all". Not moved by evidence_lag: the model is fitted per frame.
+    """
+    block = section.get("learned")
+    if evidence == "learned" or not isinstance(block, dict) or "add_cost" not in block:
+        return None
+    from falafelona import learned_team
+    learned_team.check_settings(section)
+    cost = _positive(block, "add_cost", "learned")
+    where = block.get("where", "gaps")
+    if where not in ("gaps", "all"):
+        raise ValueError(f"possession.learned.where must be 'gaps' or 'all', got {where!r}")
+    costs = learned_team.team_costs(learned_team.home_chance(match, section), cost)
+    if where == "gaps":
+        costs[~np.isnan(np.asarray(match.ball_xy)[:, 0])] = 0.0
+    return costs
+
+
+TEAM_EVIDENCE = ("nearest", "margin", "learned")
 
 
 def _hmm(match, dead_score, section):
@@ -664,6 +687,10 @@ def _hmm(match, dead_score, section):
     if evidence == "nearest":
         codes, _ = Possession(match).nearest_player_labels()
         team = nearest_team_costs(codes, team_cost)
+    elif evidence == "learned":
+        from falafelona import learned_team
+        learned_team.check_settings(section)
+        team = learned_team.team_costs(learned_team.home_chance(match, section), team_cost)
     else:
         d_home, d_away = team_distances(match.players_xy, match.ball_xy, match.slot_team)
         team = margin_team_costs(d_home, d_away, team_cost,
@@ -686,6 +713,9 @@ def _hmm(match, dead_score, section):
     touch = _touch(match, section)            # after the lag: a touch is already timed
     if touch is not None:
         team = team + touch
+    learned_extra = _learned_extra(match, section, evidence)
+    if learned_extra is not None:
+        team = team + learned_extra
     costs = add_dead_costs(team, dead_score, dead_weight)
     path = viterbi(costs, table)
     placement = _placement(section)

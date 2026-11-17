@@ -57,7 +57,7 @@ from pathlib import Path
 
 import numpy as np
 
-from falafelona import deadball, learned_dead, possession, vendor
+from falafelona import deadball, learned_dead, learned_team, possession, vendor
 from falafelona.ball import DataCleaner
 from falafelona.io import Event, Match, read_cache, write_cache
 from falafelona.pipeline import apply_x_policy
@@ -421,7 +421,32 @@ def load_idsse(match_id, root=None, pitch=None, origin="auto", pad=HALFTIME_PAD,
 
 
 # --- degrading the ball track ------------------------------------------------------------------
+def smooth_ball(xy, period, sigma):
+    """Gaussian-smoothed ball positions (sigma in frames), inside each period and each seen run.
 
+    Normalised convolution: missing frames do not count and stay missing, and nothing is mixed
+    across a half or a gap. sigma 0 returns the positions unchanged. Frames outside the graded
+    halves (period 0) are left as they are.
+    """
+    xy = np.asarray(xy, dtype=float)
+    if sigma <= 0:
+        return xy.copy()
+    period = np.asarray(period)
+    half = int(np.ceil(3 * sigma))
+    kernel = np.exp(-0.5 * (np.arange(-half, half + 1) / sigma) ** 2)
+    out = xy.copy()
+    runs = np.isfinite(xy[:, 0]) & (period > 0)
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], runs.astype(np.int8), [0]))))
+    for first, stop in zip(edges[0::2], edges[1::2], strict=True):
+        cut = np.flatnonzero(np.diff(period[first:stop])) + 1
+        for a, b in zip([0, *cut], [*cut, stop - first], strict=True):
+            part = xy[first + a:first + b]
+            size = len(part)
+            weight = np.convolve(np.ones(size), kernel)[half:half + size]   # works for any size
+            for k in (0, 1):
+                out[first + a:first + b, k] = np.convolve(part[:, k], kernel)[half:half + size] \
+                    / weight
+    return out
 
 def _degrade_settings(section, fps):
     """Check the `degrade:` section of configs/devset.yaml. Returns plain numbers."""
@@ -463,8 +488,14 @@ def _degrade_settings(section, fps):
     fault_high = int(np.floor(faults.get("max_s", 0.2) * fps + 1e-9))
     if fault_share and fault_high < fault_low:
         raise ValueError("devset config: false_detections holds no whole frame")
+    smooth_s = section.get("ball_smooth_s", 0.0)
+    if isinstance(smooth_s, bool) or not isinstance(smooth_s, (int, float)) or smooth_s < 0:
+        raise ValueError(f"devset config: degrade.ball_smooth_s must be 0 or more seconds, "
+                         f"got {smooth_s!r}")
     return {
         "missing_share": float(share),
+        "smooth_s": float(smooth_s),
+        "smooth": float(smooth_s) * fps,
         "placement": placement,
         "stoppage_lead": stoppage_lead,
         "bins": bins,
@@ -542,6 +573,10 @@ def _place_on_stoppage(rng, stoppages, blocked, length, lead, tries=200):
 def degrade_ball(match, section, seed, truth=None):
     """A copy of `match` whose ball track looks like ours. Returns (new_match, report).
 
+        Step 0 (only if ball_smooth_s > 0): the ball is smoothed with a Gaussian of that sigma in
+    seconds (smooth_ball), because our provider's ball track is smoothed: a kick's sharp turn
+    comes out rounded, about 1.5 m from the foot (team_diag.py --smooth-ball: 0.25 s matches our
+    match on the touch distance, the clear-toucher share and the ball/players time shift).
     Step 1 (only if false_detections.share > 0): short stretches of seen frames get a wrong
     position, one fixed random point on the pitch per stretch, like a detector locked onto the
     wrong object. These are what the `reject` ball method is for.
@@ -566,10 +601,10 @@ def degrade_ball(match, section, seed, truth=None):
     rng = np.random.default_rng(seed)
     ranges = _half_ranges(match.period)
     graded = int(sum(stop - start for start, stop in ranges))
-    ball_xy = match.ball_xy.copy()
+    ball_xy = smooth_ball(match.ball_xy, match.period, settings["smooth"])
     ball_speed = match.ball_speed.copy()
     report = {"placement": settings["placement"], "false_stretches": 0, "gaps_placed": 0,
-              "gaps_unplaced": 0, "gaps_off_stoppage": 0}
+              "gaps_unplaced": 0, "gaps_off_stoppage": 0, "ball_smooth_s": settings["smooth_s"]}
     if not graded:
         return match, {**report, "missing_share": None}
 
@@ -1149,6 +1184,7 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
         prepared = {}  # stage key -> stages, for this match only
         for name, cfg in configs.items():
             cfg = learned_dead.for_match(cfg, dev.match_id)   # leave-one-match-out model paths
+            cfg = learned_team.for_match(cfg, dev.match_id)
             key = _stage_key(cfg)
             if key not in prepared:
                 prepared[key] = prepare_stages(match, cfg)

@@ -12,15 +12,15 @@ def test_shipped_configs_load():
     assert load_config(CONFIGS / "baseline.yaml")["possession"]["method"] == "nearest_majority"
     assert load_config(CONFIGS / "final.yaml")["possession"]["method"] == "hmm"
 
-def test_final_is_the_cost_timing_config():
-    """final.yaml carries the same settings as configs/exp/poss-cost-timing-final.yaml."""
+def test_final_is_the_smoothed_ball_config():
+    """final.yaml carries the same settings as configs/exp/poss-smooth-dist4-lag24-final.yaml."""
     assert load_config(CONFIGS / "final.yaml") == load_config(
-        CONFIGS / "exp" / "poss-cost-timing-final.yaml")
+        CONFIGS / "exp" / "poss-smooth-dist4-lag24-final.yaml")
 
 
 def test_final_is_the_blend_with_new_costs_and_timing():
     """The step before: the blend config, with only the decoder costs and the switch timing changed."""
-    final = load_config(CONFIGS / "final.yaml")
+    final = load_config(CONFIGS / "exp" / "poss-cost-timing-final.yaml")
     changed = {"switch_cost": 10, "to_dead_cost": 18, "from_dead_cost": 18,
                "evidence_lag": 18, "switch_placement": 1.0}
     assert {key: final["possession"][key] for key in changed} == changed
@@ -82,3 +82,11 @@ def test_stage_without_method_is_rejected(tmp_path):
 def test_missing_file_is_rejected(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "nope.yaml")
+
+def test_final_is_cost_timing_with_wider_touch_and_longer_lag():
+    """The previous final (cost + timing) with touch distance 4.0 and evidence_lag 24 (D26)."""
+    final = load_config(CONFIGS / "final.yaml")
+    old = load_config(CONFIGS / "exp" / "poss-cost-timing-final.yaml")
+    old["possession"]["evidence_lag"] = 24
+    old["possession"]["touch"]["distance"] = 4.0
+    assert final == old
