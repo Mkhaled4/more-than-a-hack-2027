@@ -89,12 +89,14 @@ class Possession:
         return self.smooth(codes, window)
 
 
-def viterbi(costs: np.ndarray, switch_cost) -> np.ndarray:
+def viterbi(costs: np.ndarray, switch_cost, team_switch=None) -> np.ndarray:
     """The cheapest state sequence: int[n] of state indices, given costs float[n, k].
 
     switch_cost: one number (every change costs the same) or a [k, k] table where
     switch_cost[a, b] is the cost of going from state a to state b (diagonal = 0).
     Total cost = sum of costs[t, state_t] + the switch cost of every change.
+    team_switch: optional float[n]; the cost of a switch between states 0 and 1 (H <-> A)
+    INTO frame t, in place of the table's (the learned hazard inside ball gaps).
     Deterministic: on ties, staying beats switching and a lower state index beats a higher one.
     """
     costs = np.asarray(costs, dtype=np.float64)
@@ -111,9 +113,17 @@ def viterbi(costs: np.ndarray, switch_cost) -> np.ndarray:
 
     order = np.array([[s, *[p for p in range(k) if p != s]] for s in range(k)])
 
+    if team_switch is not None:
+        team_switch = np.asarray(team_switch, dtype=np.float64)
+        if k < 2 or team_switch.shape != (n,):
+            raise ValueError(f"team_switch must be float[{n}] and needs at least 2 states")
+        transition = transition.copy()
+
     back = np.zeros((n, k), dtype=np.int8)
     total = costs[0].copy()
     for t in range(1, n):
+        if team_switch is not None:
+            transition[0, 1] = transition[1, 0] = team_switch[t]
         candidates = total[order] + transition[order, np.arange(k)[:, None]]  # [state, prev]
         pick = np.argmin(candidates, axis=1)
         back[t] = order[np.arange(k), pick]
@@ -501,12 +511,13 @@ CONFIG_KEYS = {
     "": ("method", "window", "dead_threshold", "dead_margin", "switch_cost", "team_evidence",
          "team_cost", "margin_scale", "near_distance", "dead_weight", "to_dead_cost",
          "from_dead_cost", "evidence_lag", "fast_ball_speed", "velocity_match", "velocity",
-                  "restart", "switch_placement", "min_spell_s", "touch", "learned"),
+                  "restart", "switch_placement", "min_spell_s", "touch", "learned", "hazard"),
     "velocity": velocity.SETTING_KEYS,
     "touch": TOUCH_KEYS,
     "velocity_match": ("max_diff", "control_distance", "cost"),
     "restart": RESTART_KEYS,
     "learned": ("model", "add_cost", "where"),
+    "hazard": ("model", "cost", "min_cost"),
 }
 
 
@@ -678,6 +689,19 @@ def _learned_extra(match, section, evidence):
 TEAM_EVIDENCE = ("nearest", "margin", "learned")
 
 
+
+def _team_switch(match, section, switch_cost):
+    """float[n] H <-> A switch cost per frame from the learned hazard (learned_switch.py),
+    or None when there is no `hazard:` block (the same cost everywhere, as before)."""
+    if "hazard" not in section:
+        return None
+    from falafelona import learned_switch
+    learned_switch.check_settings(section)
+    block = section["hazard"]
+    in_gap, q, base = learned_switch.switch_chance(match, section)
+    return learned_switch.team_switch_costs(in_gap, q, base, switch_cost,
+                                            block["cost"], block["min_cost"])
+
 def _hmm(match, dead_score, section):
     """3-state HMM: H, A and D decoded together with Viterbi.
 
@@ -735,7 +759,8 @@ def _hmm(match, dead_score, section):
     if learned_extra is not None:
         team = team + learned_extra
     costs = add_dead_costs(team, dead_score, dead_weight)
-    path = viterbi(costs, table)
+    team_switch = _team_switch(match, section, table[H_STATE, A_STATE])
+    path = viterbi(costs, table) if team_switch is None else viterbi(costs, table, team_switch)
     placement = _placement(section)
     if placement is not None:
         path = place_switches(path, costs, placement)

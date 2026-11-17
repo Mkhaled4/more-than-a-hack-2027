@@ -49,7 +49,7 @@ deadball:
     free kick: 25
     kick off (after goal): 45
   learned:
-    model: models/deadball_stoppage_all.json
+    model: models/deadball_stoppage3_all.json
 possession:
   method: hmm
   team_evidence: margin

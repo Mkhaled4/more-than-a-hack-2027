@@ -57,7 +57,7 @@ from pathlib import Path
 
 import numpy as np
 
-from falafelona import deadball, learned_dead, learned_team, possession, vendor
+from falafelona import deadball, learned_dead, learned_switch, learned_team, possession, vendor
 from falafelona.ball import DataCleaner
 from falafelona.io import Event, Match, read_cache, write_cache
 from falafelona.pipeline import apply_x_policy
@@ -1185,6 +1185,7 @@ def run_devset(configs, dev_cfg, matches, degrade=True, bootstrap_n=0, tags=Fals
         for name, cfg in configs.items():
             cfg = learned_dead.for_match(cfg, dev.match_id)   # leave-one-match-out model paths
             cfg = learned_team.for_match(cfg, dev.match_id)
+            cfg = learned_switch.for_match(cfg, dev.match_id)
             key = _stage_key(cfg)
             if key not in prepared:
                 prepared[key] = prepare_stages(match, cfg)
