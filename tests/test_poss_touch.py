@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import copy
 import synthetic_idsse as syn
 
 from falafelona import devset, possession, vendor
@@ -12,6 +13,8 @@ FPS = 25.0
 H, A = possession.H_STATE, possession.A_STATE
 # final.yaml without any touch block, so the tests hold before and after final.yaml takes it
 FINAL = load_config(vendor.REPO_ROOT / "configs" / "final.yaml")
+FINAL = copy.deepcopy(FINAL)
+FINAL["possession"].pop("touch_learned", None)   # these tests check the rule touches only
 FINAL = {**FINAL, "possession": {k: v for k, v in FINAL["possession"].items() if k != "touch"}}
 TOUCH = {"offset_s": 0.2, "min_change": 5.0, "distance": 1.5, "margin": 1.0, "hold_s": 0.4,
          "cost": 0.5}
